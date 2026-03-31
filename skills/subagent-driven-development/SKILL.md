@@ -87,7 +87,7 @@ digraph process {
     "Code quality reviewer subagent approves?" -> "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" [label="yes"];
     "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" -> "Both external reviewers approve?";
     "Both external reviewers approve?" -> "Merge/dedup feedback, dispatch implementer to fix" [label="no"];
-    "Merge/dedup feedback, dispatch implementer to fix" -> "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" [label="re-review"];
+    "Merge/dedup feedback, dispatch implementer to fix" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [label="re-run internal reviews"];
     "Both external reviewers approve?" -> "Mark task complete in TodoWrite" [label="yes"];
     "Mark task complete in TodoWrite" -> "More tasks remain?";
     "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
@@ -236,6 +236,8 @@ After internal reviews (spec compliance + code quality) pass, the controller dis
 
 **Feedback merge:** Controller collects both results, merges and deduplicates issues (same issue flagged by both → single item), then dispatches implementer subagent with the merged issue list.
 
+**After fixes: re-run internal reviews.** Because the implementer changed code to address external feedback, those changes must pass spec compliance and code quality review again before re-entering external review. This prevents external fixes from introducing scope regressions or quality issues.
+
 **Exit condition:** Both Sonnet and Codex must approve. Loop continues until both pass.
 
 ### External Review Example
@@ -261,6 +263,10 @@ Codex: LGTM, no issues found.
 [Dispatch implementer subagent to fix race condition]
 
 Implementer: Added mutex lock around cache access. Tests updated.
+
+[Re-run internal reviews on the fix]
+Spec reviewer: ✅ Spec compliant
+Code quality reviewer: ✅ Approved
 
 [Re-dispatch both external reviewers in parallel]
 
