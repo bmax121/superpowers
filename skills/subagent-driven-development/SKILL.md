@@ -167,6 +167,10 @@ Spec reviewer: ✅ Spec compliant - all requirements met, nothing extra
 [Get git SHAs, dispatch code quality reviewer]
 Code reviewer: Strengths: Good test coverage, clean. Issues: None. Approved.
 
+[Dispatch external reviewers in parallel: Sonnet + /codex:review]
+Sonnet: Assessment: Approved — no additional issues found.
+Codex: No issues found.
+
 [Mark Task 1 complete]
 
 Task 2: Recovery modes
@@ -201,7 +205,14 @@ Implementer: Extracted PROGRESS_INTERVAL constant
 [Code reviewer reviews again]
 Code reviewer: ✅ Approved
 
-[Mark Task 2 complete]
+[Dispatch external reviewers in parallel: Sonnet + /codex:review]
+Sonnet: Issues:
+  - Minor: Consider extracting progress reporting into a reusable utility
+  Assessment: Approved
+
+Codex: No issues found.
+
+[Both approved → Mark Task 2 complete]
 
 ...
 
@@ -308,7 +319,7 @@ Codex: No issues found.
 - Skip review loops (reviewer found issues = implementer fixes = review again)
 - Let implementer self-review replace actual review (both are needed)
 - **Start code quality review before spec compliance is ✅** (wrong order)
-- Move to next task while either review has open issues
+- Move to next task while any review stage has open issues
 - **Skip external review after internal reviews pass** (all three stages are mandatory)
 - **Start external review before code quality review is ✅** (wrong order: spec → quality → external)
 - **Proceed when only one external reviewer approves** (both Sonnet AND Codex must approve)
