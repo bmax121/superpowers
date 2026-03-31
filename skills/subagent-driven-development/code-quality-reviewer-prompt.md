@@ -23,6 +23,8 @@ Task tool (superpowers:code-reviewer):
 - Is the implementation following the file structure from the plan?
 - Did this implementation create new files that are already large, or significantly grow existing files? (Don't flag pre-existing file sizes — focus on what this change contributed.)
 
+**Note:** These dimensions supplement the base code-reviewer template. Report findings in the dedicated Performance/Consistency/Design slots in the output format below, not under the generic Issues section. If the base template's Architecture checklist already covers an item, skip it here to avoid duplicate findings.
+
 **Performance:**
 - Are there unnecessary repeated computations, N+1 queries, or unbounded loops?
 - Are data structure choices appropriate for the access patterns?
