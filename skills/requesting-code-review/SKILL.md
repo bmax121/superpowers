@@ -77,9 +77,10 @@ You: [Fix progress indicators]
 ## Integration with Workflows
 
 **Subagent-Driven Development:**
-- Review after EACH task
+- Three-stage review after EACH task: spec compliance, code quality (expanded with performance, consistency, design), external cross-model (Sonnet + Codex)
 - Catch issues before they compound
 - Fix before moving to next task
+- External reviewers provide independent cross-model perspective
 
 **Executing Plans:**
 - Review after each batch (3 tasks)
