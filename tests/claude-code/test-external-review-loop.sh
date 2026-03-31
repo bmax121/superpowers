@@ -61,7 +61,7 @@ echo ""
 # Test 2: Review stage ordering
 echo "Test 2: Review stage ordering (spec → quality → external)..."
 
-output=$(run_claude "In subagent-driven-development, list the three review stages in order, numbered 1 2 3." 60)
+output=$(run_claude "In subagent-driven-development, list the three review stages in order, numbered 1 2 3. Use exactly these labels: 'spec compliance', 'code quality', 'external'." 60)
 
 if assert_contains_ci "$output" "spec.*compliance" "Spec compliance present"; then
     : # pass
@@ -78,6 +78,26 @@ fi
 if assert_contains_ci "$output" "external\|cross-model" "External review present"; then
     : # pass
 else
+    exit 1
+fi
+
+# Also verify ordering: spec before quality, quality before external
+# Use case-insensitive grep -in for line numbers
+spec_line=$(echo "$output" | grep -in "spec.*compliance" | head -1 | cut -d: -f1)
+quality_line=$(echo "$output" | grep -in "code.*quality" | head -1 | cut -d: -f1)
+external_line=$(echo "$output" | grep -in "external\|cross-model" | head -1 | cut -d: -f1)
+
+if [ -n "$spec_line" ] && [ -n "$quality_line" ] && [ "$spec_line" -lt "$quality_line" ]; then
+    echo "  [PASS] Spec compliance (line $spec_line) before code quality (line $quality_line)"
+else
+    echo "  [FAIL] Spec compliance should appear before code quality"
+    exit 1
+fi
+
+if [ -n "$quality_line" ] && [ -n "$external_line" ] && [ "$quality_line" -lt "$external_line" ]; then
+    echo "  [PASS] Code quality (line $quality_line) before external review (line $external_line)"
+else
+    echo "  [FAIL] Code quality should appear before external review"
     exit 1
 fi
 
