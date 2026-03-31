@@ -2,7 +2,7 @@
 
 Use this template when dispatching a code quality reviewer subagent.
 
-**Purpose:** Verify implementation is well-built (clean, tested, maintainable)
+**Purpose:** Verify implementation is well-built (clean, tested, maintainable, performant, consistent, well-designed)
 
 **Only dispatch after spec compliance review passes.**
 
@@ -23,4 +23,34 @@ Task tool (superpowers:code-reviewer):
 - Is the implementation following the file structure from the plan?
 - Did this implementation create new files that are already large, or significantly grow existing files? (Don't flag pre-existing file sizes — focus on what this change contributed.)
 
-**Code reviewer returns:** Strengths, Issues (Critical/Important/Minor), Assessment
+**Performance:**
+- Are there unnecessary repeated computations, N+1 queries, or unbounded loops?
+- Are data structure choices appropriate for the access patterns?
+- Are there obvious performance bottlenecks?
+
+**Consistency:**
+- Do naming, error handling, and logging style match the existing codebase?
+- Are API design patterns unified with the rest of the project?
+- Does this change introduce conflicting new patterns?
+
+**Design:**
+- Are abstraction levels appropriate and responsibilities clear?
+- Is the dependency direction correct?
+- Is the implementation neither over-engineered nor under-designed?
+
+**Code reviewer returns:**
+
+```
+Strengths:
+Issues:
+  - Critical: ...
+  - Important: ...
+  - Minor: ...
+Performance:
+  - ...
+Consistency:
+  - ...
+Design:
+  - ...
+Assessment: Approved / Needs Fix
+```
