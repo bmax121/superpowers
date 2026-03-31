@@ -47,10 +47,10 @@ Task tool (general-purpose):
     - Error propagation paths that cross module boundaries
     - Implicit assumptions about input data or environment
 
-    **Broader design perspective:**
-    - Does this change make the system harder to understand or modify?
-    - Are there simpler alternatives the implementer may not have considered?
-    - Will this approach cause problems as the system grows?
+    **Systemic/evolutionary concerns:**
+    - Will this approach cause problems as the codebase scales (more tasks, more contributors)?
+    - Does this change create coupling between components that should remain independent?
+    - Are there cross-cutting concerns (logging, error handling, configuration) that this task handles differently from the rest of the system?
 
     **Security:**
     - Input validation gaps
