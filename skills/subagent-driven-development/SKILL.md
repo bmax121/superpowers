@@ -5,11 +5,11 @@ description: Use when executing implementation plans with independent tasks in t
 
 # Subagent-Driven Development
 
-Execute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.
+Execute plan by dispatching fresh subagent per task, with three-stage review after each: spec compliance review, expanded code quality review (performance, consistency, design), then cross-model external review (Sonnet + Codex in parallel).
 
 **Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.
 
-**Core principle:** Fresh subagent per task + two-stage review (spec then quality) = high quality, fast iteration
+**Core principle:** Fresh subagent per task + three-stage review (spec → quality → external cross-model) = high quality, fast iteration
 
 ## When to Use
 
@@ -34,7 +34,7 @@ digraph when_to_use {
 **vs. Executing Plans (parallel session):**
 - Same session (no context switch)
 - Fresh subagent per task (no context pollution)
-- Two-stage review after each task: spec compliance first, then code quality
+- Three-stage review after each task: spec compliance, code quality (expanded), external cross-model (Sonnet + Codex)
 - Faster iteration (no human-in-loop between tasks)
 
 ## The Process
@@ -55,6 +55,14 @@ digraph process {
         "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [shape=box];
         "Code quality reviewer subagent approves?" [shape=diamond];
         "Implementer subagent fixes quality issues" [shape=box];
+
+        subgraph cluster_external {
+            label="Stage 3: External Review Loop";
+            "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" [shape=box];
+            "Both external reviewers approve?" [shape=diamond];
+            "Merge/dedup feedback, dispatch implementer to fix" [shape=box];
+        }
+
         "Mark task complete in TodoWrite" [shape=box];
     }
 
@@ -76,7 +84,11 @@ digraph process {
     "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" -> "Code quality reviewer subagent approves?";
     "Code quality reviewer subagent approves?" -> "Implementer subagent fixes quality issues" [label="no"];
     "Implementer subagent fixes quality issues" -> "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [label="re-review"];
-    "Code quality reviewer subagent approves?" -> "Mark task complete in TodoWrite" [label="yes"];
+    "Code quality reviewer subagent approves?" -> "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" [label="yes"];
+    "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" -> "Both external reviewers approve?";
+    "Both external reviewers approve?" -> "Merge/dedup feedback, dispatch implementer to fix" [label="no"];
+    "Merge/dedup feedback, dispatch implementer to fix" -> "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" [label="re-review"];
+    "Both external reviewers approve?" -> "Mark task complete in TodoWrite" [label="yes"];
     "Mark task complete in TodoWrite" -> "More tasks remain?";
     "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
     "More tasks remain?" -> "Dispatch final code reviewer subagent for entire implementation" [label="no"];
@@ -121,7 +133,8 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 
 - `./implementer-prompt.md` - Dispatch implementer subagent
 - `./spec-reviewer-prompt.md` - Dispatch spec compliance reviewer subagent
-- `./code-quality-reviewer-prompt.md` - Dispatch code quality reviewer subagent
+- `./code-quality-reviewer-prompt.md` - Dispatch code quality reviewer subagent (expanded: +performance, +consistency, +design)
+- `./external-reviewer-prompt.md` - Dispatch Sonnet external reviewer subagent (cross-model review)
 
 ## Example Workflow
 
@@ -199,6 +212,53 @@ Final reviewer: All requirements met, ready to merge
 Done!
 ```
 
+## External Review Loop
+
+After internal reviews (spec compliance + code quality) pass, the controller dispatches two external reviewers **in parallel**:
+
+**Sonnet subagent:** Dispatched via Agent tool with `model: "sonnet"`. Uses `./external-reviewer-prompt.md` template. Focuses on blind spots, cross-task consistency, systemic/evolutionary concerns, and security.
+
+**Codex review:** Invoked via `/codex:review` from `codex-plugin-cc`. Reviews the committed diff (BASE_SHA..HEAD_SHA). Async flow:
+1. Invoke `/codex:review` with the branch diff from task start to current HEAD
+2. Poll `/codex:status` until complete
+3. Retrieve results via `/codex:result`
+
+**Feedback merge:** Controller collects both results, merges and deduplicates issues (same issue flagged by both → single item), then dispatches implementer subagent with the merged issue list.
+
+**Exit condition:** Both Sonnet and Codex must approve. Loop continues until both pass.
+
+### External Review Example
+
+```
+[After internal reviews pass for Task 2]
+
+[Record BASE_SHA before task, HEAD_SHA after task]
+
+[Dispatch in parallel:]
+  1. Sonnet subagent (model: "sonnet") with external-reviewer-prompt.md
+  2. /codex:review for BASE_SHA..HEAD_SHA
+
+[Wait for both to return]
+
+Sonnet: Issues:
+  - Important: Race condition in concurrent access to shared cache (utils.ts:45)
+  Assessment: Needs Fix
+
+Codex: LGTM, no issues found.
+
+[Merge feedback: 1 Important issue from Sonnet]
+[Dispatch implementer subagent to fix race condition]
+
+Implementer: Added mutex lock around cache access. Tests updated.
+
+[Re-dispatch both external reviewers in parallel]
+
+Sonnet: Assessment: Approved — race condition properly addressed.
+Codex: No issues found.
+
+[Both approved → Mark Task 2 complete]
+```
+
 ## Advantages
 
 **vs. Manual execution:**
@@ -220,16 +280,19 @@ Done!
 
 **Quality gates:**
 - Self-review catches issues before handoff
-- Two-stage review: spec compliance, then code quality
-- Review loops ensure fixes actually work
+- Three-stage review: spec compliance, code quality (expanded), external cross-model
+- Review loops ensure fixes actually work at each stage
 - Spec compliance prevents over/under-building
-- Code quality ensures implementation is well-built
+- Code quality ensures implementation is well-built, performant, consistent, well-designed
+- External cross-model review catches blind spots that same-model review misses
 
 **Cost:**
-- More subagent invocations (implementer + 2 reviewers per task)
-- Controller does more prep work (extracting all tasks upfront)
-- Review loops add iterations
+- More subagent invocations (implementer + 2 internal reviewers + 2 external reviewers per task)
+- External review loop adds Sonnet API cost + Codex API cost per task
+- Controller does more prep work (extracting all tasks upfront, merging external feedback)
+- Review loops add iterations at each stage
 - But catches issues early (cheaper than debugging later)
+- Cross-model review is the most expensive stage — justified by catching blind spots
 
 ## Red Flags
 
@@ -246,6 +309,10 @@ Done!
 - Let implementer self-review replace actual review (both are needed)
 - **Start code quality review before spec compliance is ✅** (wrong order)
 - Move to next task while either review has open issues
+- **Skip external review after internal reviews pass** (all three stages are mandatory)
+- **Start external review before code quality review is ✅** (wrong order: spec → quality → external)
+- **Proceed when only one external reviewer approves** (both Sonnet AND Codex must approve)
+- **Send unfixed internal review issues to external review** (fix internal issues first)
 
 **If subagent asks questions:**
 - Answer clearly and completely
@@ -261,6 +328,11 @@ Done!
 **If subagent fails task:**
 - Dispatch fix subagent with specific instructions
 - Don't try to fix manually (context pollution)
+
+**If external reviewers disagree:**
+- If one approves and one finds issues, fix the issues and re-submit to both
+- If both find different issues, merge and dedup, fix all, re-submit to both
+- Never cherry-pick which reviewer's feedback to address — fix everything
 
 ## Integration
 
