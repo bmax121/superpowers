@@ -234,9 +234,9 @@ You: I'm using Subagent-Driven Development to execute this plan.
 [Extract all 5 tasks with full text and context]
 [Create TodoWrite with all tasks]
 
-─── Codex availability check ───
-  ⚠ /codex:review not available (codex-plugin-cc not installed)
-  Falling back to: Sonnet + Opus review
+─── Reviewer B detection ───
+  /codex:review skill: ✅ available (codex plugin)
+  Using: /codex:review (GPT, cross-family)
 
 ══════════════════════════════════════════════════════════
  Task 1/5: Hook installation script
@@ -262,10 +262,10 @@ Implementer:
   Result: ✅ Approved — good test coverage, clean
 
 ─── Stage 3/3: External Review ───
-  ├─ Sonnet:  dispatching...
-  ├─ Opus:    dispatching...
-  ├─ Sonnet:  ✅ Approved — no additional issues found
-  └─ Opus:    ✅ Approved — no issues found
+  ├─ Reviewer A (Sonnet):  dispatching via Agent tool...
+  ├─ Reviewer B (Codex/GPT): dispatching via /codex:review --wait...
+  ├─ Reviewer A (Sonnet):  ✅ Approved — no additional issues found
+  └─ Reviewer B (Codex/GPT): ✅ Approved — no issues found
 
 ✅ Task 1 complete
 
@@ -299,10 +299,16 @@ Implementer:
   Result: ✅ Approved
 
 ─── Stage 3/3: External Review ───
-  ├─ Sonnet:  dispatching...
-  ├─ Opus:    dispatching...
-  ├─ Sonnet:  ✅ Approved (Minor: consider extracting progress utility)
-  └─ Opus:    ✅ Approved — no issues found
+  ├─ Reviewer A (Sonnet):  dispatching via Agent tool...
+  ├─ Reviewer B (Codex/GPT): dispatching via /codex:review --wait...
+  ├─ Reviewer A (Sonnet):  ⚠ 1 Minor issue
+  │    Minor: Consider extracting progress utility
+  └─ Reviewer B (Codex/GPT): ✅ Approved — no issues found
+
+─── Triaging external review feedback ───
+  Reviewer A (Sonnet): 1 issue
+    1. [Minor] Extract progress utility → ❌ Rejected: YAGNI, only used once
+  User confirms: proceed
 
 ✅ Task 2 complete
 
