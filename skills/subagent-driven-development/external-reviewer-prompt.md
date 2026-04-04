@@ -1,13 +1,17 @@
 # External Reviewer Prompt Template
 
-Use this template when dispatching a Sonnet subagent for cross-model external review.
+Use this template when dispatching external reviewers for cross-model review in Stage 3.
 
 **Purpose:** Provide an independent cross-model perspective on code that has already passed internal spec compliance and code quality review. Catch blind spots that same-model review misses.
 
 **Only dispatch after both spec compliance and code quality reviews pass.**
 
+## Reviewer A: Sonnet Subagent (always runs)
+
+Dispatch via Agent tool with `model: "sonnet"`:
+
 ```
-Task tool (general-purpose):
+Agent tool:
   model: "sonnet"
   description: "External review for Task N: [task name]"
   prompt: |
@@ -70,3 +74,50 @@ Task tool (general-purpose):
 
     Do NOT manufacture issues. If the code is solid, say so.
 ```
+
+## Reviewer B: Best Available External Model
+
+Dispatch via the detected Reviewer B mechanism (see "Reviewer B Detection" in SKILL.md).
+
+### Option 1: /codex:review skill (codex plugin installed)
+
+```
+Skill tool:
+  skill: "codex:review"
+  args: "--wait --base {BASE_SHA}"
+```
+
+The codex plugin handles the review autonomously — it reads the git diff, runs a GPT-based review, and returns structured output. No custom prompt needed.
+
+### Option 2: codex exec review CLI (codex installed, plugin not)
+
+```bash
+codex exec review --base {BASE_SHA} --commit {HEAD_SHA} --ephemeral -o /tmp/reviewer-b-output.txt
+```
+
+Returns structured review output to the file. Read the file for results.
+
+### Option 3: gemini CLI (gemini installed)
+
+Write the Reviewer A prompt (above) to a temp file, then:
+
+```bash
+PROMPT_FILE=$(mktemp /tmp/external-reviewer-b-XXXXXX.txt)
+cat > "$PROMPT_FILE" << 'EOF'
+[Same prompt as Reviewer A above, with task spec and diff filled in]
+EOF
+gemini -p "$(cat "$PROMPT_FILE")" -m gemini-2.5-pro
+rm -f "$PROMPT_FILE"
+```
+
+### Option 4: Claude Opus Agent (fallback)
+
+```
+Agent tool:
+  model: "opus"
+  description: "External review for Task N: [task name]"
+  prompt: |
+    [Same prompt as Reviewer A above]
+```
+
+**Note:** Log a warning that both reviewers share the same model family — true model diversity was not achieved but context isolation is still enforced.
