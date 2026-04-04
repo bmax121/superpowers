@@ -352,12 +352,19 @@ echo ""
 # Test 15: Detection runs once
 echo "Test 15: Reviewer B detection caching..."
 
-output=$(run_claude "In subagent-driven-development, how often does Reviewer B detection run? Once per task or once per plan?" 60)
+output=$(run_claude "In subagent-driven-development, does Reviewer B detection run once per plan or once per task? Answer with 'per plan' or 'per task'." 60)
 
-if assert_contains_ci "$output" "once\|cache\|plan.*start\|single" "Detection runs once per plan"; then
+if assert_contains_ci "$output" "per plan\|plan.*start\|plan.*execution\|cache.*result" "Detection runs once per plan"; then
     : # pass
 else
     exit 1
+fi
+
+if echo "$output" | grep -iq "per task\|each task\|every task"; then
+    echo "  [FAIL] Detection should be per plan, not per task"
+    exit 1
+else
+    echo "  [PASS] Does not say per-task"
 fi
 
 echo ""
