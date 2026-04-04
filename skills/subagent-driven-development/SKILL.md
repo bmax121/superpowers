@@ -319,32 +319,64 @@ Done!
 
 After internal reviews (spec compliance + code quality) pass, the controller dispatches two external reviewers **in parallel**:
 
-**Sonnet subagent:** Dispatched via Agent tool with `model: "sonnet"`. Uses `./external-reviewer-prompt.md` template. Focuses on blind spots, cross-task consistency, systemic/evolutionary concerns, and security.
+**Reviewer A (always Claude Sonnet):** Dispatched via Agent tool with `model: "sonnet"`. Uses `./external-reviewer-prompt.md` template. Focuses on blind spots, cross-task consistency, systemic/evolutionary concerns, and security.
 
-**Codex review (preferred):** Invoked via `/codex:review` from `codex-plugin-cc`. Reviews the committed diff (BASE_SHA..HEAD_SHA). Async flow:
-1. Invoke `/codex:review` with the branch diff from task start to current HEAD
-2. Poll `/codex:status` until complete
-3. Retrieve results via `/codex:result`
+**Reviewer B (best available — see "Reviewer B Detection"):** Dispatched via the detected mechanism (codex skill, codex CLI, gemini CLI, or opus agent). The detection result is cached from plan start.
 
-**Opus fallback:** When Codex is unavailable, dispatch a second Agent tool subagent with `model: "opus"` using the same `./external-reviewer-prompt.md` template. The goal is cross-model diversity — any model that differs from the implementer's model works.
+**Parallel execution:** Reviewer A (Agent tool) and Reviewer B (Skill/Bash/Agent tool) dispatch in the same message for concurrent execution.
 
-**Feedback merge:** Controller collects both results, merges and deduplicates issues (same issue flagged by both → single item), then dispatches implementer subagent with the merged issue list.
+### Feedback Triage
 
-**After fixes: re-run internal reviews.** Because the implementer changed code to address external feedback, those changes must pass spec compliance and code quality review again before re-entering external review. This prevents external fixes from introducing scope regressions or quality issues.
+External reviewer feedback is **not automatically trusted**. The controller must evaluate each issue before acting.
 
-**Exit condition:** Both external reviewers must approve. Loop continues until both pass.
+**Output format:**
+```
+─── Triaging external review feedback ───
+  Reviewer A (Sonnet): 2 issues
+    1. [Important] Race condition in cache access → ✅ Valid, dispatching fix
+    2. [Minor] Variable naming style → ❌ Rejected: matches project convention
+  Reviewer B (Codex/GPT): 1 issue
+    1. [Important] Missing null check on line 45 → ⚠ Discuss: function is internal-only, caller guarantees non-null
+```
+
+**Triage categories:**
+- **Valid** → accept, dispatch implementer to fix
+- **Rejected** → explain why (wrong assumption, matches existing convention, etc.), skip
+- **Discuss** → present to user with controller's assessment, let user decide
+
+**Triage criteria:**
+- Does the issue identify a real bug or security problem? → likely valid
+- Does the reviewer misunderstand project conventions or constraints? → likely reject
+- Is the reviewer applying generic best practices that don't fit this context? → likely reject
+- Is the issue about a design trade-off with no clear right answer? → discuss with user
+
+**After triage:**
+1. Controller presents triage results to user with reasoning for each decision
+2. User confirms or overrides any triage decisions
+3. Controller dispatches implementer subagent to fix only the accepted issues
+4. Re-runs internal reviews (Stage 1 + 2) on the fix
+5. Re-runs Stage 3 with both external reviewers
+
+**Exit condition:** Both reviewers approve, OR all remaining issues have been triaged as rejected/discussed and user has confirmed.
 
 ### External Review Example
 
 ```
 ─── Stage 3/3: External Review ───
-  ├─ Sonnet:  dispatching...
-  ├─ Codex:   dispatching...
-  ├─ Sonnet:  ❌ Needs Fix (1 Important)
+  ├─ Reviewer A (Sonnet):  dispatching via Agent tool...
+  ├─ Reviewer B (Codex/GPT): dispatching via /codex:review --wait --base abc123...
+  ├─ Reviewer A (Sonnet):  ❌ Needs Fix (1 Important)
   │    Important: Race condition in concurrent access to shared cache (utils.ts:45)
-  └─ Codex:   ✅ Approved
+  └─ Reviewer B (Codex/GPT): ✅ Approved
 
-  Merging feedback: 1 Important issue from Sonnet
+─── Triaging external review feedback ───
+  Reviewer A (Sonnet): 1 issue
+    1. [Important] Race condition in cache access → ✅ Valid
+  Reviewer B (Codex/GPT): 0 issues
+
+  Presenting triage to user...
+  User confirms: proceed with fix
+
   Dispatching implementer to fix...
 
   Re-running internal reviews on fix:
@@ -354,10 +386,8 @@ After internal reviews (spec compliance + code quality) pass, the controller dis
   Result: ✅ Approved
 
 ─── Stage 3/3: External Review (round 2) ───
-  ├─ Sonnet:  dispatching...
-  ├─ Codex:   dispatching...
-  ├─ Sonnet:  ✅ Approved — race condition properly addressed
-  └─ Codex:   ✅ Approved
+  ├─ Reviewer A (Sonnet):  ✅ Approved — race condition properly addressed
+  └─ Reviewer B (Codex/GPT): ✅ Approved
 
 ✅ Task 2 complete
 ```
