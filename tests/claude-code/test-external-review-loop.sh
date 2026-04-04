@@ -360,9 +360,14 @@ else
     exit 1
 fi
 
+# Reject answers that say detection runs per-task, but allow negations like "not per task"
 if echo "$output" | grep -iq "per task\|each task\|every task"; then
-    echo "  [FAIL] Detection should be per plan, not per task"
-    exit 1
+    if echo "$output" | grep -iq "not per task\|not.*each task\|not.*every task\|per plan.*not.*per task"; then
+        echo "  [PASS] Contains negated per-task reference (acceptable)"
+    else
+        echo "  [FAIL] Detection should be per plan, not per task"
+        exit 1
+    fi
 else
     echo "  [PASS] Does not say per-task"
 fi

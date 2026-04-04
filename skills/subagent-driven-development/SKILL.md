@@ -58,20 +58,23 @@ digraph process {
 
         subgraph cluster_external {
             label="Stage 3: External Review Loop";
-            "Dispatch Reviewer A + Reviewer B review in parallel (./external-reviewer-prompt.md)" [shape=box];
-            "Both external reviewers approve?" [shape=diamond];
-            "Merge/dedup feedback, dispatch implementer to fix" [shape=box];
+            "Dispatch Reviewer A + Reviewer B in parallel" [shape=box];
+            "Triage feedback (Valid/Rejected/Discuss)" [shape=box];
+            "User confirms triage" [shape=diamond];
+            "Dispatch implementer to fix valid issues" [shape=box];
         }
 
         "Mark task complete in TodoWrite" [shape=box];
     }
 
+    "Detect Reviewer B (once at plan start)" [shape=box];
     "Read plan, extract all tasks with full text, note context, create TodoWrite" [shape=box];
     "More tasks remain?" [shape=diamond];
     "Dispatch final code reviewer subagent for entire implementation" [shape=box];
     "Use superpowers:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
-    "Read plan, extract all tasks with full text, note context, create TodoWrite" -> "Dispatch implementer subagent (./implementer-prompt.md)";
+    "Read plan, extract all tasks with full text, note context, create TodoWrite" -> "Detect Reviewer B (once at plan start)";
+    "Detect Reviewer B (once at plan start)" -> "Dispatch implementer subagent (./implementer-prompt.md)";
     "Dispatch implementer subagent (./implementer-prompt.md)" -> "Implementer subagent asks questions?";
     "Implementer subagent asks questions?" -> "Answer questions, provide context" [label="yes"];
     "Answer questions, provide context" -> "Dispatch implementer subagent (./implementer-prompt.md)";
@@ -84,11 +87,12 @@ digraph process {
     "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" -> "Code quality reviewer subagent approves?";
     "Code quality reviewer subagent approves?" -> "Implementer subagent fixes quality issues" [label="no"];
     "Implementer subagent fixes quality issues" -> "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [label="re-review"];
-    "Code quality reviewer subagent approves?" -> "Dispatch Reviewer A + Reviewer B review in parallel (./external-reviewer-prompt.md)" [label="yes"];
-    "Dispatch Reviewer A + Reviewer B review in parallel (./external-reviewer-prompt.md)" -> "Both external reviewers approve?";
-    "Both external reviewers approve?" -> "Merge/dedup feedback, dispatch implementer to fix" [label="no"];
-    "Merge/dedup feedback, dispatch implementer to fix" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [label="re-run internal reviews"];
-    "Both external reviewers approve?" -> "Mark task complete in TodoWrite" [label="yes"];
+    "Code quality reviewer subagent approves?" -> "Dispatch Reviewer A + Reviewer B in parallel" [label="yes"];
+    "Dispatch Reviewer A + Reviewer B in parallel" -> "Triage feedback (Valid/Rejected/Discuss)";
+    "Triage feedback (Valid/Rejected/Discuss)" -> "User confirms triage";
+    "User confirms triage" -> "Mark task complete in TodoWrite" [label="all approved or rejected"];
+    "User confirms triage" -> "Dispatch implementer to fix valid issues" [label="has valid issues"];
+    "Dispatch implementer to fix valid issues" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [label="re-run internal reviews"];
     "Mark task complete in TodoWrite" -> "More tasks remain?";
     "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
     "More tasks remain?" -> "Dispatch final code reviewer subagent for entire implementation" [label="no"];
@@ -149,10 +153,10 @@ Implementer subagents report one of four statuses. Handle each appropriately:
   Result: ✅ Approved
 
 ─── Stage 3/3: External Review ───
-  ├─ Reviewer A (Sonnet):  dispatching...
-  ├─ Reviewer B:           dispatching...
-  ├─ Reviewer A (Sonnet):  ✅ Approved
-  └─ Reviewer B:           ✅ Approved
+  ├─ Reviewer A (Sonnet):    dispatching...
+  ├─ Reviewer B ({detected}): dispatching...
+  ├─ Reviewer A (Sonnet):    ✅ Approved
+  └─ Reviewer B ({detected}): ✅ Approved
 
 ✅ Task {N}/{TOTAL} complete
 ```
