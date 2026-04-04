@@ -92,21 +92,24 @@ The codex plugin handles the review autonomously — it reads the git diff, runs
 ### Option 2: codex exec review CLI (codex installed, plugin not)
 
 ```bash
-codex exec review --base {BASE_SHA} --commit {HEAD_SHA} --ephemeral -o /tmp/reviewer-b-output.txt
+OUTPUT_FILE=$(mktemp /tmp/reviewer-b-XXXXXX.txt)
+codex exec review --base {BASE_SHA} --commit {HEAD_SHA} --ephemeral -o "$OUTPUT_FILE"
+cat "$OUTPUT_FILE"
+rm -f "$OUTPUT_FILE"
 ```
 
-Returns structured review output to the file. Read the file for results.
+Uses a unique temp file per review to avoid collisions with concurrent runs.
 
 ### Option 3: gemini CLI (gemini installed)
 
-Write the Reviewer A prompt (above) to a temp file, then:
+Write the Reviewer A prompt (above) to a temp file, then pipe via stdin to avoid CLI arg length limits:
 
 ```bash
 PROMPT_FILE=$(mktemp /tmp/external-reviewer-b-XXXXXX.txt)
 cat > "$PROMPT_FILE" << 'EOF'
 [Same prompt as Reviewer A above, with task spec and diff filled in]
 EOF
-gemini -p "$(cat "$PROMPT_FILE")" -m gemini-2.5-pro
+cat "$PROMPT_FILE" | gemini -m gemini-2.5-pro
 rm -f "$PROMPT_FILE"
 ```
 
