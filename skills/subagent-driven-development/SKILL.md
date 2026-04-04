@@ -444,10 +444,12 @@ External reviewer feedback is **not automatically trusted**. The controller must
 - Move to next task while any review stage has open issues
 - **Skip external review after internal reviews pass** (all three stages are mandatory)
 - **Start external review before code quality review is ✅** (wrong order: spec → quality → external)
-- **Proceed when only one external reviewer approves** (both external reviewers must approve)
+- **Proceed when only one external reviewer approves** (both external reviewers must approve, or user confirms triage rejections)
 - **Send unfixed internal review issues to external review** (fix internal issues first)
-- **Skip Codex availability check** (run it once at plan start, cache the result)
+- **Skip Reviewer B detection** (run it once at plan start, cache the result)
 - **Omit stage markers** (user must see which stage is active at all times)
+- **Blindly accept external review feedback** (triage first — external models may misunderstand project conventions)
+- **Skip user confirmation on triage** (user must confirm valid/rejected/discuss decisions)
 
 **If subagent asks questions:**
 - Answer clearly and completely
@@ -465,9 +467,11 @@ External reviewer feedback is **not automatically trusted**. The controller must
 - Don't try to fix manually (context pollution)
 
 **If external reviewers disagree:**
-- If one approves and one finds issues, fix the issues and re-submit to both
-- If both find different issues, merge and dedup, fix all, re-submit to both
-- Never cherry-pick which reviewer's feedback to address — fix everything
+- If one approves and one finds issues, triage the issues first, then fix valid ones and re-submit to both
+- If both find different issues, merge and dedup, triage all, fix valid ones, re-submit to both
+- Never cherry-pick which reviewer's feedback to address — triage everything, fix what's valid
+- If reviewer flags something that matches project conventions, reject with explanation
+- When in doubt, present as "Discuss" and let the user decide
 
 ## Integration
 
