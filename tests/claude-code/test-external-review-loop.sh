@@ -267,4 +267,99 @@ fi
 
 echo ""
 
+# Test 11: Stage progress markers are mandatory
+echo "Test 11: Stage progress markers..."
+
+output=$(run_claude "In subagent-driven-development, how should the controller display review progress to the user? Are stage markers mandatory or optional?" 60)
+
+if assert_contains_ci "$output" "stage" "Mentions stage markers"; then
+    : # pass
+else
+    exit 1
+fi
+
+if assert_contains_ci "$output" "must\|required\|mandatory" "Stage markers are mandatory"; then
+    : # pass
+else
+    exit 1
+fi
+
+echo ""
+
+# Test 12: Four-level Reviewer B detection
+echo "Test 12: Reviewer B four-level fallback..."
+
+output=$(run_claude "In subagent-driven-development, what are the four levels of Reviewer B detection for external review? List them in order." 60)
+
+if assert_contains_ci "$output" "codex.*review.*skill\|/codex:review\|codex.*plugin" "Level 1: codex review skill"; then
+    : # pass
+else
+    exit 1
+fi
+
+if assert_contains_ci "$output" "codex.*cli\|codex.*exec\|command.*codex" "Level 2: codex CLI"; then
+    : # pass
+else
+    exit 1
+fi
+
+if assert_contains_ci "$output" "gemini" "Level 3: gemini CLI"; then
+    : # pass
+else
+    exit 1
+fi
+
+if assert_contains_ci "$output" "opus\|fallback" "Level 4: opus fallback"; then
+    : # pass
+else
+    exit 1
+fi
+
+echo ""
+
+# Test 13: Feedback triage requirement
+echo "Test 13: Feedback triage..."
+
+output=$(run_claude "In subagent-driven-development, what happens with external review feedback before it is acted on? Is it automatically trusted?" 60)
+
+if assert_contains_ci "$output" "triage\|evaluat\|not.*trust\|not.*automatic" "Feedback is not automatically trusted"; then
+    : # pass
+else
+    exit 1
+fi
+
+if assert_contains_ci "$output" "valid\|reject\|discuss" "Triage categories mentioned"; then
+    : # pass
+else
+    exit 1
+fi
+
+echo ""
+
+# Test 14: User confirmation in triage
+echo "Test 14: User confirmation in triage..."
+
+output=$(run_claude "In subagent-driven-development external review triage, does the user get to confirm or override triage decisions?" 60)
+
+if assert_contains_ci "$output" "user.*confirm\|user.*override\|user.*decide\|present.*user" "User confirms triage"; then
+    : # pass
+else
+    exit 1
+fi
+
+echo ""
+
+# Test 15: Detection runs once
+echo "Test 15: Reviewer B detection caching..."
+
+output=$(run_claude "In subagent-driven-development, how often does Reviewer B detection run? Once per task or once per plan?" 60)
+
+if assert_contains_ci "$output" "once\|cache\|plan.*start\|single" "Detection runs once per plan"; then
+    : # pass
+else
+    exit 1
+fi
+
+echo ""
+
 echo "=== All external review loop tests passed ==="
