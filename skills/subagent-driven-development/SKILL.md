@@ -90,7 +90,7 @@ digraph process {
     "Code quality reviewer subagent approves?" -> "Dispatch Reviewer A + Reviewer B in parallel" [label="yes"];
     "Dispatch Reviewer A + Reviewer B in parallel" -> "Triage feedback (Valid/Rejected/Discuss)";
     "Triage feedback (Valid/Rejected/Discuss)" -> "User confirms triage";
-    "User confirms triage" -> "Mark task complete in TodoWrite" [label="all approved or rejected"];
+    "User confirms triage" -> "Mark task complete in TodoWrite" [label="all approved, rejected, or discussed"];
     "User confirms triage" -> "Dispatch implementer to fix valid issues" [label="has valid issues"];
     "Dispatch implementer to fix valid issues" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [label="re-run internal reviews"];
     "Mark task complete in TodoWrite" -> "More tasks remain?";
@@ -191,8 +191,8 @@ At plan start (before Task 1 begins), detect the best available Reviewer B and c
 **Four-level fallback chain:**
 
 1. **`/codex:review` skill** (codex plugin installed): Invoke via Skill tool with `--wait --base {BASE_SHA}`. Async alternative: invoke without `--wait`, poll `/codex:status`, retrieve via `/codex:result`. True cross-family diversity (GPT model).
-2. **Codex CLI** (codex installed, plugin not): `codex exec review --base {BASE_SHA} --commit {HEAD_SHA} --ephemeral -o /tmp/reviewer-b-output.txt`. Same GPT model via standalone CLI.
-3. **Gemini CLI** (gemini installed, codex not): `gemini -p "$(cat $PROMPT_FILE)" -m gemini-2.5-pro`. Cross-family diversity via Gemini.
+2. **Codex CLI** (codex installed, plugin not): `codex exec review --base {BASE_SHA} --commit {HEAD_SHA} --ephemeral -o "$(mktemp /tmp/reviewer-b-XXXXXX.txt)"`. Same GPT model via standalone CLI.
+3. **Gemini CLI** (gemini installed, codex not): Write prompt to temp file, pipe via stdin: `gemini -m gemini-2.5-pro < "$PROMPT_FILE"`. Cross-family diversity via Gemini.
 4. **Claude Opus Agent** (no external CLI): Agent tool with `model: "opus"` using `./external-reviewer-prompt.md`. Same-family fallback — still provides diversity via different capability tier.
 
 **Detection output examples:**

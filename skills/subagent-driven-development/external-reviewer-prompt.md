@@ -109,7 +109,7 @@ PROMPT_FILE=$(mktemp /tmp/external-reviewer-b-XXXXXX.txt)
 cat > "$PROMPT_FILE" << 'EOF'
 [Same prompt as Reviewer A above, with task spec and diff filled in]
 EOF
-cat "$PROMPT_FILE" | gemini -m gemini-2.5-pro
+gemini -m gemini-2.5-pro < "$PROMPT_FILE"
 rm -f "$PROMPT_FILE"
 ```
 
