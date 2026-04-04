@@ -5,7 +5,7 @@ description: Use when executing implementation plans with independent tasks in t
 
 # Subagent-Driven Development
 
-Execute plan by dispatching fresh subagent per task, with three-stage review after each: spec compliance review, expanded code quality review (performance, consistency, design), then cross-model external review (Sonnet + Codex in parallel).
+Execute plan by dispatching fresh subagent per task, with three-stage review after each: spec compliance review, expanded code quality review (performance, consistency, design), then cross-model external review (Reviewer A + Reviewer B in parallel).
 
 **Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.
 
@@ -34,7 +34,7 @@ digraph when_to_use {
 **vs. Executing Plans (parallel session):**
 - Same session (no context switch)
 - Fresh subagent per task (no context pollution)
-- Three-stage review after each task: spec compliance, code quality (expanded), external cross-model (Sonnet + Codex)
+- Three-stage review after each task: spec compliance, code quality (expanded), external cross-model (Reviewer A + Reviewer B)
 - Faster iteration (no human-in-loop between tasks)
 
 ## The Process
@@ -58,7 +58,7 @@ digraph process {
 
         subgraph cluster_external {
             label="Stage 3: External Review Loop";
-            "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" [shape=box];
+            "Dispatch Reviewer A + Reviewer B review in parallel (./external-reviewer-prompt.md)" [shape=box];
             "Both external reviewers approve?" [shape=diamond];
             "Merge/dedup feedback, dispatch implementer to fix" [shape=box];
         }
@@ -84,8 +84,8 @@ digraph process {
     "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" -> "Code quality reviewer subagent approves?";
     "Code quality reviewer subagent approves?" -> "Implementer subagent fixes quality issues" [label="no"];
     "Implementer subagent fixes quality issues" -> "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [label="re-review"];
-    "Code quality reviewer subagent approves?" -> "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" [label="yes"];
-    "Dispatch Sonnet + Codex review in parallel (./external-reviewer-prompt.md)" -> "Both external reviewers approve?";
+    "Code quality reviewer subagent approves?" -> "Dispatch Reviewer A + Reviewer B review in parallel (./external-reviewer-prompt.md)" [label="yes"];
+    "Dispatch Reviewer A + Reviewer B review in parallel (./external-reviewer-prompt.md)" -> "Both external reviewers approve?";
     "Both external reviewers approve?" -> "Merge/dedup feedback, dispatch implementer to fix" [label="no"];
     "Merge/dedup feedback, dispatch implementer to fix" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [label="re-run internal reviews"];
     "Both external reviewers approve?" -> "Mark task complete in TodoWrite" [label="yes"];
@@ -149,12 +149,12 @@ Implementer subagents report one of four statuses. Handle each appropriately:
   Result: ✅ Approved
 
 ─── Stage 3/3: External Review ───
-  ├─ Sonnet:  dispatching...
-  ├─ Codex:   dispatching...
-  ├─ Sonnet:  ✅ Approved
-  └─ Codex:   ✅ Approved
+  ├─ Reviewer A (Sonnet):  dispatching...
+  ├─ Reviewer B:           dispatching...
+  ├─ Reviewer A (Sonnet):  ✅ Approved
+  └─ Reviewer B:           ✅ Approved
 
-✅ Task {N} complete
+✅ Task {N}/{TOTAL} complete
 ```
 
 **On failure, show the loop:**
@@ -175,7 +175,7 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 
 ## Reviewer B Detection
 
-Before entering Stage 3 for the first time, detect the best available Reviewer B and cache the result for all tasks in this plan.
+At plan start (before Task 1 begins), detect the best available Reviewer B and cache the result for all tasks in this plan.
 
 **Detection runs once at plan start. Output the detection results:**
 
@@ -223,7 +223,7 @@ When nothing external found:
 - `./implementer-prompt.md` - Dispatch implementer subagent
 - `./spec-reviewer-prompt.md` - Dispatch spec compliance reviewer subagent
 - `./code-quality-reviewer-prompt.md` - Dispatch code quality reviewer subagent (expanded: +performance, +consistency, +design)
-- `./external-reviewer-prompt.md` - Dispatch Sonnet external reviewer subagent (cross-model review)
+- `./external-reviewer-prompt.md` - Dispatch external reviewers (Reviewer A + Reviewer B, cross-model review)
 
 ## Example Workflow
 
