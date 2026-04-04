@@ -129,6 +129,95 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 
 **Never** ignore an escalation or force the same model to retry without changes. If the implementer said it's stuck, something needs to change.
 
+## Stage Progress Display
+
+**You MUST output stage markers before each review stage.** This gives the user real-time visibility into where the process is.
+
+**Format — output these exact markers (with task number and name filled in):**
+
+```
+══════════════════════════════════════════════════════════
+ Task {N}/{TOTAL}: {task name}
+══════════════════════════════════════════════════════════
+
+─── Stage 1/3: Spec Compliance ───
+  Dispatching spec reviewer...
+  Result: ✅ Spec compliant
+
+─── Stage 2/3: Code Quality ───
+  Dispatching code quality reviewer...
+  Result: ✅ Approved
+
+─── Stage 3/3: External Review ───
+  ├─ Sonnet:  dispatching...
+  ├─ Codex:   dispatching...
+  ├─ Sonnet:  ✅ Approved
+  └─ Codex:   ✅ Approved
+
+✅ Task {N} complete
+```
+
+**On failure, show the loop:**
+```
+─── Stage 1/3: Spec Compliance ───
+  Dispatching spec reviewer...
+  Result: ❌ Issues found (2 items)
+  Dispatching implementer to fix...
+  Re-dispatching spec reviewer...
+  Result: ✅ Spec compliant
+```
+
+**Rules:**
+- Output the stage marker BEFORE dispatching each subagent
+- Update the result line AFTER the subagent returns
+- Show loop iterations inline (don't restart the stage marker)
+- Use `├─` for in-progress items, `└─` for the last item in a group
+
+## Reviewer B Detection
+
+Before entering Stage 3 for the first time, detect the best available Reviewer B and cache the result for all tasks in this plan.
+
+**Detection runs once at plan start. Output the detection results:**
+
+```
+─── Reviewer B detection ───
+  /codex:review skill: checking...
+```
+
+**Four-level fallback chain:**
+
+1. **`/codex:review` skill** (codex plugin installed): Invoke via Skill tool with `--wait --base {BASE_SHA}`. Async alternative: invoke without `--wait`, poll `/codex:status`, retrieve via `/codex:result`. True cross-family diversity (GPT model).
+2. **Codex CLI** (codex installed, plugin not): `codex exec review --base {BASE_SHA} --commit {HEAD_SHA} --ephemeral -o /tmp/reviewer-b-output.txt`. Same GPT model via standalone CLI.
+3. **Gemini CLI** (gemini installed, codex not): `gemini -p "$(cat $PROMPT_FILE)" -m gemini-2.5-pro`. Cross-family diversity via Gemini.
+4. **Claude Opus Agent** (no external CLI): Agent tool with `model: "opus"` using `./external-reviewer-prompt.md`. Same-family fallback — still provides diversity via different capability tier.
+
+**Detection output examples:**
+
+When codex plugin found:
+```
+─── Reviewer B detection ───
+  /codex:review skill: ✅ available (codex plugin)
+  Using: /codex:review (GPT, cross-family)
+```
+
+When only codex CLI found:
+```
+─── Reviewer B detection ───
+  /codex:review skill: not available
+  codex CLI: ✅ found (v0.116.0)
+  Using: codex exec review (GPT, cross-family)
+```
+
+When nothing external found:
+```
+─── Reviewer B detection ───
+  /codex:review skill: not available
+  codex CLI: not found
+  gemini CLI: not found
+  ⚠ No external reviewer available — falling back to Claude Opus
+  Using: Agent tool model: "opus" (same-family fallback)
+```
+
 ## Prompt Templates
 
 - `./implementer-prompt.md` - Dispatch implementer subagent
@@ -145,74 +234,77 @@ You: I'm using Subagent-Driven Development to execute this plan.
 [Extract all 5 tasks with full text and context]
 [Create TodoWrite with all tasks]
 
-Task 1: Hook installation script
+─── Codex availability check ───
+  ⚠ /codex:review not available (codex-plugin-cc not installed)
+  Falling back to: Sonnet + Opus review
 
-[Get Task 1 text and context (already extracted)]
+══════════════════════════════════════════════════════════
+ Task 1/5: Hook installation script
+══════════════════════════════════════════════════════════
+
 [Dispatch implementation subagent with full task text + context]
 
 Implementer: "Before I begin - should the hook be installed at user or system level?"
-
 You: "User level (~/.config/superpowers/hooks/)"
 
-Implementer: "Got it. Implementing now..."
-[Later] Implementer:
+Implementer:
   - Implemented install-hook command
   - Added tests, 5/5 passing
   - Self-review: Found I missed --force flag, added it
   - Committed
 
-[Dispatch spec compliance reviewer]
-Spec reviewer: ✅ Spec compliant - all requirements met, nothing extra
+─── Stage 1/3: Spec Compliance ───
+  Dispatching spec reviewer...
+  Result: ✅ Spec compliant — all requirements met, nothing extra
 
-[Get git SHAs, dispatch code quality reviewer]
-Code reviewer: Strengths: Good test coverage, clean. Issues: None. Approved.
+─── Stage 2/3: Code Quality ───
+  Dispatching code quality reviewer...
+  Result: ✅ Approved — good test coverage, clean
 
-[Dispatch external reviewers in parallel: Sonnet + /codex:review]
-Sonnet: Assessment: Approved — no additional issues found.
-Codex: No issues found.
+─── Stage 3/3: External Review ───
+  ├─ Sonnet:  dispatching...
+  ├─ Opus:    dispatching...
+  ├─ Sonnet:  ✅ Approved — no additional issues found
+  └─ Opus:    ✅ Approved — no issues found
 
-[Mark Task 1 complete]
+✅ Task 1 complete
 
-Task 2: Recovery modes
+══════════════════════════════════════════════════════════
+ Task 2/5: Recovery modes
+══════════════════════════════════════════════════════════
 
-[Get Task 2 text and context (already extracted)]
 [Dispatch implementation subagent with full task text + context]
 
-Implementer: [No questions, proceeds]
 Implementer:
   - Added verify/repair modes
   - 8/8 tests passing
   - Self-review: All good
   - Committed
 
-[Dispatch spec compliance reviewer]
-Spec reviewer: ❌ Issues:
-  - Missing: Progress reporting (spec says "report every 100 items")
-  - Extra: Added --json flag (not requested)
+─── Stage 1/3: Spec Compliance ───
+  Dispatching spec reviewer...
+  Result: ❌ Issues found (2 items)
+    - Missing: Progress reporting (spec says "report every 100 items")
+    - Extra: Added --json flag (not requested)
+  Dispatching implementer to fix...
+  Re-dispatching spec reviewer...
+  Result: ✅ Spec compliant
 
-[Implementer fixes issues]
-Implementer: Removed --json flag, added progress reporting
+─── Stage 2/3: Code Quality ───
+  Dispatching code quality reviewer...
+  Result: ❌ Issues found (1 item)
+    - Important: Magic number (100) should be a named constant
+  Dispatching implementer to fix...
+  Re-dispatching code quality reviewer...
+  Result: ✅ Approved
 
-[Spec reviewer reviews again]
-Spec reviewer: ✅ Spec compliant now
+─── Stage 3/3: External Review ───
+  ├─ Sonnet:  dispatching...
+  ├─ Opus:    dispatching...
+  ├─ Sonnet:  ✅ Approved (Minor: consider extracting progress utility)
+  └─ Opus:    ✅ Approved — no issues found
 
-[Dispatch code quality reviewer]
-Code reviewer: Strengths: Solid. Issues (Important): Magic number (100)
-
-[Implementer fixes]
-Implementer: Extracted PROGRESS_INTERVAL constant
-
-[Code reviewer reviews again]
-Code reviewer: ✅ Approved
-
-[Dispatch external reviewers in parallel: Sonnet + /codex:review]
-Sonnet: Issues:
-  - Minor: Consider extracting progress reporting into a reusable utility
-  Assessment: Approved
-
-Codex: No issues found.
-
-[Both approved → Mark Task 2 complete]
+✅ Task 2 complete
 
 ...
 
@@ -229,51 +321,45 @@ After internal reviews (spec compliance + code quality) pass, the controller dis
 
 **Sonnet subagent:** Dispatched via Agent tool with `model: "sonnet"`. Uses `./external-reviewer-prompt.md` template. Focuses on blind spots, cross-task consistency, systemic/evolutionary concerns, and security.
 
-**Codex review:** Invoked via `/codex:review` from `codex-plugin-cc`. Reviews the committed diff (BASE_SHA..HEAD_SHA). Async flow:
+**Codex review (preferred):** Invoked via `/codex:review` from `codex-plugin-cc`. Reviews the committed diff (BASE_SHA..HEAD_SHA). Async flow:
 1. Invoke `/codex:review` with the branch diff from task start to current HEAD
 2. Poll `/codex:status` until complete
 3. Retrieve results via `/codex:result`
+
+**Opus fallback:** When Codex is unavailable, dispatch a second Agent tool subagent with `model: "opus"` using the same `./external-reviewer-prompt.md` template. The goal is cross-model diversity — any model that differs from the implementer's model works.
 
 **Feedback merge:** Controller collects both results, merges and deduplicates issues (same issue flagged by both → single item), then dispatches implementer subagent with the merged issue list.
 
 **After fixes: re-run internal reviews.** Because the implementer changed code to address external feedback, those changes must pass spec compliance and code quality review again before re-entering external review. This prevents external fixes from introducing scope regressions or quality issues.
 
-**Exit condition:** Both Sonnet and Codex must approve. Loop continues until both pass.
+**Exit condition:** Both external reviewers must approve. Loop continues until both pass.
 
 ### External Review Example
 
 ```
-[After internal reviews pass for Task 2]
+─── Stage 3/3: External Review ───
+  ├─ Sonnet:  dispatching...
+  ├─ Codex:   dispatching...
+  ├─ Sonnet:  ❌ Needs Fix (1 Important)
+  │    Important: Race condition in concurrent access to shared cache (utils.ts:45)
+  └─ Codex:   ✅ Approved
 
-[Record BASE_SHA before task, HEAD_SHA after task]
+  Merging feedback: 1 Important issue from Sonnet
+  Dispatching implementer to fix...
 
-[Dispatch in parallel:]
-  1. Sonnet subagent (model: "sonnet") with external-reviewer-prompt.md
-  2. /codex:review for BASE_SHA..HEAD_SHA
+  Re-running internal reviews on fix:
+─── Stage 1/3: Spec Compliance (re-review) ───
+  Result: ✅ Spec compliant
+─── Stage 2/3: Code Quality (re-review) ───
+  Result: ✅ Approved
 
-[Wait for both to return]
+─── Stage 3/3: External Review (round 2) ───
+  ├─ Sonnet:  dispatching...
+  ├─ Codex:   dispatching...
+  ├─ Sonnet:  ✅ Approved — race condition properly addressed
+  └─ Codex:   ✅ Approved
 
-Sonnet: Issues:
-  - Important: Race condition in concurrent access to shared cache (utils.ts:45)
-  Assessment: Needs Fix
-
-Codex: LGTM, no issues found.
-
-[Merge feedback: 1 Important issue from Sonnet]
-[Dispatch implementer subagent to fix race condition]
-
-Implementer: Added mutex lock around cache access. Tests updated.
-
-[Re-run internal reviews on the fix]
-Spec reviewer: ✅ Spec compliant
-Code quality reviewer: ✅ Approved
-
-[Re-dispatch both external reviewers in parallel]
-
-Sonnet: Assessment: Approved — race condition properly addressed.
-Codex: No issues found.
-
-[Both approved → Mark Task 2 complete]
+✅ Task 2 complete
 ```
 
 ## Advantages
@@ -305,7 +391,7 @@ Codex: No issues found.
 
 **Cost:**
 - More subagent invocations (implementer + 2 internal reviewers + 2 external reviewers per task)
-- External review loop adds Sonnet API cost + Codex API cost per task
+- External review loop adds Sonnet API cost + Codex/Opus API cost per task
 - Controller does more prep work (extracting all tasks upfront, merging external feedback)
 - Review loops add iterations at each stage
 - But catches issues early (cheaper than debugging later)
@@ -328,8 +414,10 @@ Codex: No issues found.
 - Move to next task while any review stage has open issues
 - **Skip external review after internal reviews pass** (all three stages are mandatory)
 - **Start external review before code quality review is ✅** (wrong order: spec → quality → external)
-- **Proceed when only one external reviewer approves** (both Sonnet AND Codex must approve)
+- **Proceed when only one external reviewer approves** (both external reviewers must approve)
 - **Send unfixed internal review issues to external review** (fix internal issues first)
+- **Skip Codex availability check** (run it once at plan start, cache the result)
+- **Omit stage markers** (user must see which stage is active at all times)
 
 **If subagent asks questions:**
 - Answer clearly and completely
