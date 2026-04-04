@@ -25,7 +25,7 @@ fi
 # Parse command line arguments
 VERBOSE=false
 SPECIFIC_TEST=""
-TIMEOUT=300  # Default 5 minute timeout per test
+TIMEOUT=600  # Default 10 minute timeout per test (9 claude -p calls need ~30s each + startup)
 RUN_INTEGRATION=false
 
 while [[ $# -gt 0 ]]; do
