@@ -33,7 +33,7 @@ echo "Test 2: Workflow ordering..."
 
 output=$(run_claude "In the subagent-driven-development skill, which review comes FIRST: spec compliance or code quality? Answer with just the name of whichever comes first." 30)
 
-if assert_contains "$output" "spec" "Spec compliance comes first"; then
+if assert_contains "$output" "spec\|Spec" "Spec compliance comes first"; then
     : # pass
 else
     exit 1
