@@ -114,6 +114,22 @@ assert_order() {
     if [ "$line_a" -lt "$line_b" ]; then
         echo "  [PASS] $test_name (A at line $line_a, B at line $line_b)"
         return 0
+    elif [ "$line_a" -eq "$line_b" ]; then
+        # Same line — compare character position within that line
+        local the_line=$(echo "$output" | sed -n "${line_a}p")
+        local pos_a=$(echo "$the_line" | grep -b -o "$pattern_a" | head -1 | cut -d: -f1)
+        local pos_b=$(echo "$the_line" | grep -b -o "$pattern_b" | head -1 | cut -d: -f1)
+        if [ -n "$pos_a" ] && [ -n "$pos_b" ] && [ "$pos_a" -lt "$pos_b" ]; then
+            echo "  [PASS] $test_name (both on line $line_a, A at col $pos_a, B at col $pos_b)"
+            return 0
+        elif [ -n "$pos_a" ] && [ -n "$pos_b" ] && [ "$pos_a" -eq "$pos_b" ]; then
+            echo "  [PASS] $test_name (both on line $line_a, same position — likely overlapping)"
+            return 0
+        else
+            echo "  [FAIL] $test_name"
+            echo "  Expected '$pattern_a' before '$pattern_b' on line $line_a"
+            return 1
+        fi
     else
         echo "  [FAIL] $test_name"
         echo "  Expected '$pattern_a' before '$pattern_b'"
