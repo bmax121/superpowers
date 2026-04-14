@@ -110,6 +110,51 @@ else
 fi
 rm -rf "$t6"
 
+# Test 7: budget-exhausted exit writes frontmatter.status = budget_exhausted
+t7=$(setup)
+now_iso=$(python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"))')
+cat > "$t7/home/.claude/metrics/costs.jsonl" <<EOF
+{"timestamp":"$now_iso","estimated_cost_usd":150.00,"session_id":"x","model":"sonnet","input_tokens":0,"output_tokens":0}
+EOF
+HOME="$t7/home" bash "$SCRIPT" "$t7/docs/superpowers/plans/dummy.md" --dry-run --budget-pct 20 --max-handoffs 1 >/dev/null 2>&1 || true
+got=$(python3 -c "
+import re
+t = open('$t7/docs/superpowers/plans/dummy.md').read()
+m = re.search(r'^status:\s*(\S+)', t, re.MULTILINE)
+print(m.group(1) if m else 'unset')
+")
+if [[ "$got" == "budget_exhausted" ]]; then
+  echo "  [PASS] frontmatter.status written as budget_exhausted on exit"; PASS=$((PASS+1))
+else
+  echo "  [FAIL] frontmatter.status = $got (want budget_exhausted)"; FAIL=$((FAIL+1))
+fi
+rm -rf "$t7"
+
+# Test 8: outer script PROPAGATES terminal frontmatter.status written by controller
+t8=$(setup)
+# Rewrite status to already-terminal
+python3 -c "
+import re
+p = '$t8/docs/superpowers/plans/dummy.md'
+t = open(p).read()
+t = re.sub(r'^status:\s*\S+', 'status: goal_met', t, count=1, flags=re.MULTILINE)
+open(p,'w').write(t)
+"
+HOME="$t8/home" bash "$SCRIPT" "$t8/docs/superpowers/plans/dummy.md" --dry-run --budget-pct none >/dev/null 2>&1
+rc=$?
+got=$(python3 -c "
+import re
+t = open('$t8/docs/superpowers/plans/dummy.md').read()
+m = re.search(r'^status:\s*(\S+)', t, re.MULTILINE)
+print(m.group(1) if m else 'unset')
+")
+if [[ "$rc" -eq 0 && "$got" == "goal_met" ]]; then
+  echo "  [PASS] outer script propagates terminal frontmatter.status=goal_met (rc=0)"; PASS=$((PASS+1))
+else
+  echo "  [FAIL] propagation: rc=$rc, status=$got (want rc=0, status=goal_met)"; FAIL=$((FAIL+1))
+fi
+rm -rf "$t8"
+
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -306,6 +306,38 @@ else
   esac
 fi
 
+# ---- terminal-status writer + loop terminator ----
+# Update frontmatter.status in plan.md (top-level key). No-op if no plan.md
+# or frontmatter is missing.
+write_plan_status() {
+  local plan="$1" new_status="$2"
+  [[ -z "$plan" || ! -f "$plan" ]] && return 0
+  python3 - "$plan" "$new_status" <<'PY'
+import sys, re
+plan_path, new_status = sys.argv[1], sys.argv[2]
+with open(plan_path) as f:
+    text = f.read()
+m = re.match(r"^(---\n)(.*?)(\n---\n)(.*)$", text, re.DOTALL)
+if not m:
+    sys.exit(0)
+head_open, fm, head_close, body = m.groups()
+if re.search(r"^status:\s*\S", fm, re.MULTILINE):
+    fm = re.sub(r"^status:\s*\S+.*$", f"status: {new_status}", fm, count=1, flags=re.MULTILINE)
+else:
+    fm = fm.rstrip() + f"\nstatus: {new_status}\n"
+with open(plan_path, "w") as f:
+    f.write(head_open + fm + head_close + body)
+PY
+}
+
+# Exit the loop with a named plan status, exit code, and human-readable reason.
+terminate_loop() {
+  local status="$1" exit_code="$2" reason="$3"
+  echo "[autonomous-loop] terminating: status=$status — $reason" >&2
+  write_plan_status "$PLAN_FILE" "$status"
+  exit "$exit_code"
+}
+
 cleanup() {
   echo "" >&2
   echo "[autonomous-loop] interrupted — checkpoint preserved at $CHECKPOINT" >&2
@@ -324,18 +356,37 @@ echo "[autonomous-loop] start. checkpoint=$CHECKPOINT budget_pct=${BUDGET_PCT:-u
 while [[ $SESSION_N -lt $MAX_HANDOFFS ]]; do
   SESSION_N=$((SESSION_N + 1))
 
-  # Budget gate — runs every iteration
-  if ! check_budget "$BUDGET_PCT" "$BUDGET_CAP_USD" >&2; then
-    exit 1
+  # Terminal-state propagation: read controller-written frontmatter.status.
+  # Any terminal value → map to exit code and stop.
+  if [[ -n "$PLAN_FILE" && -f "$PLAN_FILE" ]]; then
+    fm_status=$(read_plan_frontmatter "$PLAN_FILE" "status" 2>/dev/null)
+    case "$fm_status" in
+      goal_met)             terminate_loop "goal_met" 0 "controller marked final_goal met" ;;
+      goal_not_met)         terminate_loop "goal_not_met" 1 "controller marked final_goal unreachable within bound" ;;
+      budget_exhausted)     terminate_loop "budget_exhausted" 1 "controller marked budget exhausted" ;;
+      stalled)              terminate_loop "stalled" 1 "controller marked stalled" ;;
+      blocked|judge_uncertain|review_contradiction|main_branch_gate)
+                            terminate_loop "$fm_status" 2 "controller hard gate: $fm_status" ;;
+      ""|not_started|in_progress) : ;;  # continue
+      *)                    echo "[autonomous-loop] unknown frontmatter.status='$fm_status', continuing" >&2 ;;
+    esac
   fi
 
-  # Completion check (before spawning — if already done, exit clean)
-  if [[ -f "$CHECKPOINT" ]]; then
-    done_n=$(count_done_tasks)
-    total_n=$(count_total_tasks)
-    if [[ $total_n -gt 0 && $done_n -ge $total_n ]]; then
-      echo "[autonomous-loop] ✅ plan complete ($done_n/$total_n tasks). total sessions: $((SESSION_N - 1))" >&2
-      exit 0
+  # Budget gate — runs every iteration
+  if ! check_budget "$BUDGET_PCT" "$BUDGET_CAP_USD" >&2; then
+    terminate_loop "budget_exhausted" 1 "check_budget failed pre-flight"
+  fi
+
+  # Completion check: only used as legacy fallback when there's no plan.md
+  # frontmatter to consult. For 6.1.0 plans the controller is responsible
+  # for writing goal_met.
+  if [[ -z "$PLAN_FILE" || ! -f "$PLAN_FILE" ]]; then
+    if [[ -f "$CHECKPOINT" ]]; then
+      done_n=$(count_done_tasks)
+      total_n=$(count_total_tasks)
+      if [[ $total_n -gt 0 && $done_n -ge $total_n ]]; then
+        terminate_loop "goal_met" 0 "legacy: all tasks done (no frontmatter to verify)"
+      fi
     fi
   fi
 
@@ -370,12 +421,12 @@ while [[ $SESSION_N -lt $MAX_HANDOFFS ]]; do
   if [[ -f "$NEEDS_HUMAN_FILE" ]]; then
     echo "[autonomous-loop] ⚠ NEEDS_HUMAN.txt written. stopping loop." >&2
     cat "$NEEDS_HUMAN_FILE" >&2
-    exit 2
+    terminate_loop "blocked" 2 "NEEDS_HUMAN.txt detected"
   fi
 
   if [[ ! -f "$CHECKPOINT" ]]; then
     echo "[autonomous-loop] ❌ no checkpoint was written. session may have failed to start. see $LOG_FILE" >&2
-    exit 1
+    terminate_loop "stalled" 1 "first session produced no checkpoint"
   fi
 
   done_n=$(count_done_tasks)
@@ -390,7 +441,7 @@ while [[ $SESSION_N -lt $MAX_HANDOFFS ]]; do
     echo "[autonomous-loop]   no-progress counter: $NO_PROGRESS/$NO_PROGRESS_ABORT" >&2
     if [[ $NO_PROGRESS -ge $NO_PROGRESS_ABORT ]]; then
       echo "[autonomous-loop] ❌ aborting: $NO_PROGRESS consecutive sessions with no new tasks completed" >&2
-      exit 1
+      terminate_loop "stalled" 1 "no new tasks completed in $NO_PROGRESS_ABORT handoffs"
     fi
   else
     NO_PROGRESS=0
@@ -402,4 +453,4 @@ while [[ $SESSION_N -lt $MAX_HANDOFFS ]]; do
 done
 
 echo "[autonomous-loop] ❌ reached max_handoffs=$MAX_HANDOFFS without finishing" >&2
-exit 1
+terminate_loop "stalled" 1 "reached max_handoffs=$MAX_HANDOFFS without finishing"
