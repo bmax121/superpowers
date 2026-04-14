@@ -89,6 +89,27 @@ else
 fi
 rm -rf "$t4"
 
+# Test 5: plan frontmatter provides autonomous_limits; CLI --max-handoffs overrides
+t5=$(setup)
+# frontmatter already says max_handoffs: 2 (from setup's fixture); CLI should win when provided
+out=$(HOME="$t5/home" bash "$SCRIPT" "$t5/docs/superpowers/plans/dummy.md" --dry-run --budget-pct none --max-handoffs 7 2>&1 || true)
+if echo "$out" | grep -q "max_handoffs=7"; then
+  echo "  [PASS] CLI --max-handoffs overrides frontmatter"; PASS=$((PASS+1))
+else
+  echo "  [FAIL] frontmatter/cli precedence — got:"; echo "$out" | head -5 | sed 's/^/    /'; FAIL=$((FAIL+1))
+fi
+rm -rf "$t5"
+
+# Test 6: without CLI override, frontmatter's autonomous_limits.max_handoffs wins
+t6=$(setup)
+out=$(HOME="$t6/home" bash "$SCRIPT" "$t6/docs/superpowers/plans/dummy.md" --dry-run --budget-pct none 2>&1 || true)
+if echo "$out" | grep -q "max_handoffs=2"; then
+  echo "  [PASS] frontmatter max_handoffs=2 used when CLI omits"; PASS=$((PASS+1))
+else
+  echo "  [FAIL] frontmatter default not honored — got:"; echo "$out" | head -5 | sed 's/^/    /'; FAIL=$((FAIL+1))
+fi
+rm -rf "$t6"
+
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

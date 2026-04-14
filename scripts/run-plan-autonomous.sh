@@ -127,23 +127,6 @@ NEEDS_HUMAN_FILE="$CHECKPOINT_DIR/NEEDS_HUMAN.txt"
 # Clear stale NEEDS_HUMAN from previous runs so we don't confuse ourselves.
 rm -f "$NEEDS_HUMAN_FILE"
 
-# ---- bootstrap prompt ----
-# If a checkpoint already exists, use /resume-plan. Otherwise start fresh
-# from the plan file.
-if [[ -f "$CHECKPOINT" ]]; then
-  INITIAL_PROMPT="/resume-plan $CHECKPOINT"
-else
-  case "$INPUT" in
-    *.md)
-      INITIAL_PROMPT=$'Execute this plan using superpowers:subagent-driven-development in autonomous loop mode.\n\nPlan: '"$INPUT"$'\n\nYou are running under scripts/run-plan-autonomous.sh. Env var SUPERPOWERS_AUTONOMOUS_LOOP=1 is set. Do not call AskUserQuestion — write NEEDS_HUMAN.txt if a hard gate fires. At handoff, exit the turn cleanly.'
-      ;;
-    *)
-      echo "ERROR: cannot start from non-plan input when checkpoint missing" >&2
-      exit 3
-      ;;
-  esac
-fi
-
 # ---- helpers ----
 # Counts task statuses in the checkpoint's top-level tasks array. Works on
 # both pretty-printed and minified JSON. Uses python3 (standard on macOS +
@@ -223,6 +206,105 @@ check_budget() {
     return 0
   fi
 }
+
+# ---- plan.md frontmatter helpers ----
+# Read a single scalar key from plan.md YAML frontmatter (top-level or
+# nested one level deep via "parent.key"). Empty string if absent.
+read_plan_frontmatter() {
+  local plan="$1" key="$2"
+  python3 - "$plan" "$key" <<'PY' 2>/dev/null
+import sys, re, os
+plan_path, key = sys.argv[1], sys.argv[2]
+if not os.path.isfile(plan_path):
+    sys.exit(0)
+with open(plan_path) as f:
+    text = f.read()
+m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+if not m:
+    sys.exit(0)
+fm = m.group(1)
+try:
+    import yaml
+    data = yaml.safe_load(fm) or {}
+except Exception:
+    # Fallback: line grep for top-level scalars and inline-dict values like {k: v, ...}
+    import json as _json
+    data = {}
+    for line in fm.splitlines():
+        s = line.strip()
+        if s and not s.startswith("#") and ":" in s and not line.startswith(" "):
+            k, _, v = s.partition(":")
+            k, v = k.strip(), v.strip()
+            if v.startswith("{") and v.endswith("}"):
+                # Convert YAML flow-style dict to JSON by quoting bare keys
+                try:
+                    data[k] = _json.loads(re.sub(r'(\w+)\s*:', r'"\1":', v))
+                    continue
+                except Exception:
+                    pass
+            data[k] = v
+# Walk dotted key
+cur = data
+for part in key.split("."):
+    if isinstance(cur, dict) and part in cur:
+        cur = cur[part]
+    else:
+        sys.exit(0)
+if cur is None:
+    sys.exit(0)
+print(cur)
+PY
+}
+
+# ---- plan frontmatter override ----
+# Plan-frontmatter override of autonomous_limits (CLI flags still win)
+PLAN_FILE=""
+case "$INPUT" in
+  *.md) PLAN_FILE="$INPUT" ;;
+  *)
+    # Try to derive plan from checkpoint's plan_path field
+    if [[ -f "$CHECKPOINT" ]] && command -v python3 >/dev/null 2>&1; then
+      PLAN_FILE=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('plan_path',''))" "$CHECKPOINT" 2>/dev/null || echo "")
+    fi
+    ;;
+esac
+
+if [[ -n "$PLAN_FILE" && -f "$PLAN_FILE" ]]; then
+  # Only apply when the user did NOT pass the corresponding CLI flag.
+  if [[ "$MAX_HANDOFFS" == "10" ]]; then
+    fm_val=$(read_plan_frontmatter "$PLAN_FILE" "autonomous_limits.max_handoffs")
+    [[ -n "$fm_val" ]] && MAX_HANDOFFS="$fm_val"
+  fi
+  if [[ "$NO_PROGRESS_ABORT" == "2" ]]; then
+    fm_val=$(read_plan_frontmatter "$PLAN_FILE" "autonomous_limits.no_progress_abort_after")
+    [[ -n "$fm_val" ]] && NO_PROGRESS_ABORT="$fm_val"
+  fi
+  if [[ -z "$BUDGET_PCT" && -z "$BUDGET_CAP_USD" ]]; then
+    fm_val=$(read_plan_frontmatter "$PLAN_FILE" "autonomous_limits.budget_pct")
+    [[ -n "$fm_val" ]] && BUDGET_PCT="$fm_val"
+    fm_val=$(read_plan_frontmatter "$PLAN_FILE" "autonomous_limits.budget_cap_usd")
+    [[ -n "$fm_val" ]] && BUDGET_CAP_USD="$fm_val"
+  fi
+fi
+
+echo "[autonomous-loop] effective limits: max_handoffs=$MAX_HANDOFFS no_progress_abort=$NO_PROGRESS_ABORT budget_pct=${BUDGET_PCT:-unset} budget_cap_usd=${BUDGET_CAP_USD:-unset}" >&2
+
+# ---- bootstrap prompt ----
+# If a checkpoint already exists, use /resume-plan. Otherwise start fresh
+# from the plan file.
+if [[ -f "$CHECKPOINT" ]]; then
+  INITIAL_PROMPT="/resume-plan $CHECKPOINT"
+else
+  case "$INPUT" in
+    *.md)
+      INITIAL_PROMPT=$'Execute this plan using superpowers:subagent-driven-development in autonomous loop mode.\n\nPlan: '"$INPUT"$'\n\nYou are running under scripts/run-plan-autonomous.sh. Env var SUPERPOWERS_AUTONOMOUS_LOOP=1 is set. Do not call AskUserQuestion — write NEEDS_HUMAN.txt if a hard gate fires. At handoff, exit the turn cleanly.'
+      ;;
+    *)
+      echo "ERROR: cannot start from non-plan input when checkpoint missing" >&2
+      exit 3
+      ;;
+  esac
+fi
 
 cleanup() {
   echo "" >&2
