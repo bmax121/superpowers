@@ -324,6 +324,91 @@ PASS
 **REFACTOR**
 Extract validation for multiple fields if needed.
 
+## Test Coverage Layers
+
+TDD's Red-Green-Refactor discipline tells you *how* to write each test. It
+does **not** tell you *how many kinds of test* your code needs. "I have
+passing unit tests" is not the same as "this code is tested." Every
+non-trivial piece of code needs its appropriate slice of these three layers,
+plus targeted boundary / stress / concurrency tests.
+
+### Unit
+Pure functions, single-class logic, utilities. Fast (< 50ms each), no
+network, no disk, no real external systems. This is what most TDD examples
+show. Necessary but rarely sufficient.
+
+### Integration
+Module-to-module contracts. Real DB (use testcontainers or an ephemeral
+instance — not a mock). Real HTTP handlers (invoke your router, don't
+stub it). Real message queues if your code uses them. The goal: if two
+modules have a wire-format mismatch, these tests catch it; pure unit tests
+won't.
+
+**When in doubt:** if your code talks to a process you don't own (DB, queue,
+HTTP service), there must be at least one integration test that hits a real
+instance of that process.
+
+### End-to-End
+For user-facing code: Playwright / Cypress / equivalent running the actual
+user journey. For CLIs: subprocess the binary with real args. For servers:
+start the server, fire real requests. E2E tests are slower — you don't run
+one per function, you run one per user-visible flow.
+
+## Boundary / Stress / Concurrency
+
+Unit + integration + E2E gives coverage *width*. These three give *depth*.
+Most production bugs live here.
+
+### Boundary (every public function needs these)
+- **Empty / null / undefined** — `""`, `[]`, `{}`, `None`, `null`, missing argument
+- **Single element** — list of one, map of one key, string of one char
+- **Max / overflow** — `MAX_INT`, largest-realistic input, buffer-sized input + 1
+- **Invalid** — wrong type, malformed JSON, bad UTF-8, unclosed quotes
+- **Date edge cases** — leap year (Feb 29), DST transitions, timezone flips, pre-1970 timestamps, Y2K38
+
+### Stress (latency-sensitive or high-throughput paths)
+Use the language's standard benchmark tool and assert a concrete threshold.
+Don't just "measure" — **assert**:
+
+| Language | Tool | Assertion style |
+|---|---|---|
+| Go | `testing.B` + `go test -bench=.` | `if b.Elapsed() > X { b.Fatal(...) }` |
+| Rust | `criterion` | `criterion_group!` + regression threshold |
+| JS/TS | `tinybench` or `autocannon` for HTTP | `expect(p99).toBeLessThan(X)` |
+| Python | `pytest-benchmark` | `benchmark.pedantic(..., rounds=N)` + assert |
+| Java/Kotlin | JMH | `@Benchmark` + external threshold check |
+| Swift | XCTest `measure { }` | `XCTMetric` with baseline |
+| Any | `k6`, `wrk`, `artillery` | CLI script with SLO assertions |
+
+At minimum, one stress test per service/endpoint that names a p99 latency
+or throughput target. If you don't know the target, that itself is a
+problem — ask, or pick a conservative one and mark it `TODO: revisit`.
+
+### Concurrency (MANDATORY for any code touching shared state)
+
+If the code uses threads, goroutines, async/await with shared state, or
+runs behind a web server that serves concurrent requests — a concurrency
+test is required. "I read the code and it looks safe" is not a test.
+
+| Language | Race / concurrency tool |
+|---|---|
+| Go | `go test -race` — always run with `-race` on anything touching shared memory |
+| Rust | `loom` crate for model checking; Miri for UB; `cargo test --release` with N-thread stress |
+| Java/Kotlin | JCStress for memory-model bugs; `CompletableFuture.allOf` for multi-thread fuzz; `ExecutorService` + barriers |
+| JS/TS | `Promise.all(Array(N).fill(op()))` for async races; for workers: actual worker threads with shared ArrayBuffer |
+| Python | `threading` + `pytest-xdist -n auto`; `hypothesis` strategies with `@given` for async fuzz |
+| Swift | Thread Sanitizer (`-sanitize=thread`); actor-based code needs explicit reentrancy tests |
+| C/C++ | TSan (`-fsanitize=thread`); Helgrind; ASan for use-after-free in callbacks |
+
+Write a test that **intentionally** tries to expose the race: N threads or
+N concurrent async calls hitting the same code path, with assertions on
+the final state. Run it under the race detector. Run it many times
+(≥ 100 iterations) — races are probabilistic.
+
+**Not applicable?** Only when the code is genuinely single-threaded with no
+shared mutable state and no async I/O. State that in your self-review so
+a reviewer can confirm.
+
 ## Verification Checklist
 
 Before marking work complete:
@@ -336,6 +421,10 @@ Before marking work complete:
 - [ ] Output pristine (no errors, warnings)
 - [ ] Tests use real code (mocks only if unavoidable)
 - [ ] Edge cases and errors covered
+- [ ] **Unit + integration + E2E coverage matches this code's actual surfaces** (or justified "not applicable" per layer)
+- [ ] **Boundary tests** for every public function (null/empty/max/invalid/date-edge)
+- [ ] **Stress test with a concrete assertion** for latency- or throughput-sensitive code (or "not applicable" with rationale)
+- [ ] **Concurrency test under the language's race detector** for any code touching shared state (or "not applicable" with rationale)
 
 Can't check all boxes? You skipped TDD. Start over.
 

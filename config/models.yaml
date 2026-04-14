@@ -1,0 +1,118 @@
+# Model routing configuration for superpowers:subagent-driven-development
+#
+# Two sections:
+#   tiers      - ordered provider/model chains for each task complexity tier
+#   providers  - how each provider is actually invoked
+#
+# The controller reads this file at plan start, probes which providers are
+# available on the current machine (see scripts/detect-model-providers.sh),
+# and for each task picks the first AVAILABLE (provider, model) in the tier's
+# chain. If a provider invocation fails at runtime the controller falls to
+# the next entry in the chain and logs the event to the plan's checkpoint
+# under decisions_log.
+#
+# To add a new model (e.g. GLM, Qwen, DeepSeek):
+#   1. Add a provider block under `providers:` with either
+#        type: agent_tool       (Claude Code's built-in Agent tool; model
+#                                must be one of anthropic's aliases: haiku,
+#                                sonnet, opus, or a full model id)
+#        type: cli_wrapper      (any CLI that can read a prompt file and
+#                                write a result file; see `command` below)
+#   2. Reference it from any tier's chain.
+#
+# CLI wrapper contract (type: cli_wrapper):
+#   The `command` template is shell-expanded with these placeholders:
+#     {model}        -> the model id declared in the tier entry
+#     {prompt_file}  -> path to a file containing the full implementer prompt
+#     {output_file}  -> path the CLI MUST write its stdout-equivalent report to
+#   The CLI must exit 0 on success and produce a report that starts with the
+#   structured header defined in implementer-prompt.md (Status: DONE|...).
+#   Any non-zero exit or missing Status line is treated as failure and the
+#   controller falls back.
+
+tiers:
+  # Mechanical: 1-2 files, clear spec, no judgment calls.
+  # Controller session runs Opus, so step DOWN to Sonnet for cheap mechanical
+  # work. Haiku is intentionally NOT the default — Sonnet is the lowest we
+  # trust for production-code writing. Below Sonnet the fallbacks are
+  # cross-family CLIs (codex/gemini/glm) for cost + diversity, then Haiku
+  # as the Anthropic cheap-last-resort.
+  mechanical:
+    - provider: anthropic
+      model: sonnet
+    - provider: codex
+      model: gpt-5.4
+    - provider: gemini-cli
+      model: gemini-2.5-flash
+    - provider: glm-cli
+      model: glm-4.6
+    - provider: anthropic
+      model: haiku
+
+  # Integration: multi-file coordination, pattern matching, debugging.
+  # Same default (Sonnet) — integration needs judgment, not extra capability
+  # over mechanical. Cross-family CLIs as middle fallbacks; escalate to Opus
+  # only if every other provider fails.
+  integration:
+    - provider: anthropic
+      model: sonnet
+    - provider: codex
+      model: gpt-5.4
+    - provider: gemini-cli
+      model: gemini-2.5-pro
+    - provider: glm-cli
+      model: glm-4.6
+    - provider: anthropic
+      model: opus
+
+  # Architecture: design decisions, broad codebase understanding, reviews.
+  # Always use the most capable available model; cross-family capable models
+  # (GPT-5 / Gemini 2.5 Pro) are acceptable if Anthropic is unavailable.
+  architecture:
+    - provider: anthropic
+      model: opus
+    - provider: codex
+      model: gpt-5.4
+    - provider: gemini-cli
+      model: gemini-2.5-pro
+    - provider: anthropic
+      model: sonnet
+
+providers:
+  # Built-in: invoked via Claude Code's Agent tool.
+  # Always available when running inside Claude Code.
+  anthropic:
+    type: agent_tool
+
+  # GLM via its CLI. GLM has no single official CLI; common wrappers are
+  # `glm`, `zai`, or a curl-based shim. If your CLI differs, edit the
+  # command template. The contract is: accept a prompt from a file (or
+  # stdin), emit the final assistant message to `{output_file}`.
+  # Default below assumes a hypothetical `glm exec --prompt-file ... --output ...`.
+  # Realistic swap-ins:
+  #   command: "glm -m {model} < {prompt_file} > {output_file}"
+  #   command: "zai chat --model {model} --file {prompt_file} --output {output_file}"
+  glm-cli:
+    type: cli_wrapper
+    command: "glm exec --model {model} --prompt-file {prompt_file} --output {output_file}"
+
+  # Codex CLI wrapper (real syntax, tested against codex 1.x).
+  # `codex exec` reads the prompt from stdin if `-` is used; `-m` selects the
+  # model; `-o` (a.k.a. --output-last-message) writes the final assistant
+  # message to a file. Adding `--skip-git-repo-check` avoids blocking when the
+  # worktree doesn't look like a git repo from codex's perspective.
+  # Also used as Reviewer B in stage-3 review — that path lives in
+  # subagent-driven-development/SKILL.md, not here; this entry is for using
+  # codex as an IMPLEMENTER.
+  codex:
+    type: cli_wrapper
+    command: "codex exec -m {model} -o {output_file} --skip-git-repo-check - < {prompt_file}"
+
+  # Gemini CLI wrapper. Real syntax (tested against gemini-cli 0.x):
+  # headless mode requires `-p` to be present; stdin is appended to the `-p`
+  # string. We pass `-p ""` so the prompt file content becomes the entire
+  # input. Output goes to stdout, captured via shell redirect.
+  # Requires GEMINI_API_KEY (or Vertex auth) in env.
+  gemini-cli:
+    type: cli_wrapper
+    command: "gemini -m {model} -p '' < {prompt_file} > {output_file}"

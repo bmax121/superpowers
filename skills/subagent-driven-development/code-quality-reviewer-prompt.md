@@ -40,6 +40,14 @@ Task tool (superpowers:code-reviewer):
 - Is the dependency direction correct?
 - Is the implementation neither over-engineered nor under-designed?
 
+**Test Coverage Depth (mandatory — flag as Important if missing without justification):**
+Refer to `superpowers:test-driven-development` → "Test Coverage Layers" and "Boundary / Stress / Concurrency".
+- Does the test suite include the appropriate mix of **unit / integration / E2E** for this code's surfaces? Pure unit tests alone are insufficient if the code talks to DBs, queues, or HTTP services.
+- Are there **boundary tests** (null / empty / max / invalid / date-edge) for every public function?
+- For latency- or throughput-sensitive code: is there a **stress test with a concrete p99 or throughput assertion**?
+- For any code touching shared state (threads, goroutines, async with shared memory, web handlers serving concurrent requests): is there a **concurrency test run under the language's race detector** (`go test -race`, `loom`, Thread Sanitizer, JCStress, etc.)?
+- If a layer or category is genuinely not applicable, the implementer's report should say so with rationale. "Not tested" without rationale = Important issue.
+
 **Code reviewer returns:**
 
 ```
@@ -54,5 +62,10 @@ Consistency:
   - ...
 Design:
   - ...
+Test Coverage:
+  - Layers: unit [✓/✗/na], integration [✓/✗/na], E2E [✓/✗/na]
+  - Boundary: [✓/✗] — list missing if ✗
+  - Stress: [✓/✗/na] — rationale if na
+  - Concurrency: [✓/✗/na] — rationale if na
 Assessment: Approved / Needs Fix
 ```

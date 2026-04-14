@@ -32,7 +32,44 @@ escape_for_json() {
 
 using_superpowers_escaped=$(escape_for_json "$using_superpowers_content")
 warning_escaped=$(escape_for_json "$warning_message")
-session_context="<EXTREMELY_IMPORTANT>\nYou have superpowers.\n\n**Below is the full content of your 'superpowers:using-superpowers' skill - your introduction to using skills. For all other skills, use the 'Skill' tool:**\n\n${using_superpowers_escaped}\n\n${warning_escaped}\n</EXTREMELY_IMPORTANT>"
+
+# Scan for unfinished plan checkpoints in the current working directory.
+# A checkpoint is "unfinished" when ANY task has status != "done".
+# We intentionally only inspect files under docs/superpowers/checkpoints/
+# to avoid surprising the user with reads elsewhere.
+#
+# Surfaces ONE line per unfinished checkpoint:
+#   [superpowers] Unfinished checkpoint: <path> (tasks: D done / T total)
+# Does not auto-resume — the user decides via /resume-plan.
+checkpoint_hint=""
+checkpoint_dir="$(pwd)/docs/superpowers/checkpoints"
+if [ -d "$checkpoint_dir" ] && command -v python3 >/dev/null 2>&1; then
+    while IFS= read -r -d '' cp_file; do
+        # Parse with python3 so we handle both pretty-printed and minified JSON.
+        # Output: "<done> <total>"; "0 0" on any parse failure.
+        counts=$(python3 - "$cp_file" <<'PY' 2>/dev/null || echo "0 0"
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+    tasks = d.get("tasks", [])
+    done = sum(1 for t in tasks if t.get("status") == "done")
+    print(f"{done} {len(tasks)}")
+except Exception:
+    print("0 0")
+PY
+)
+        done_n="${counts%% *}"
+        total_n="${counts##* }"
+        if [ "${total_n:-0}" -gt 0 ] && [ "${done_n:-0}" -lt "${total_n:-0}" ]; then
+            checkpoint_hint="${checkpoint_hint}\n[superpowers] Unfinished checkpoint: ${cp_file} (tasks: ${done_n} done / ${total_n} total). Consider /resume-plan to continue."
+        fi
+    done < <(find "$checkpoint_dir" -maxdepth 1 -type f -name '*-checkpoint.json' -print0 2>/dev/null)
+fi
+
+checkpoint_hint_escaped=$(escape_for_json "$checkpoint_hint")
+
+session_context="<EXTREMELY_IMPORTANT>\nYou have superpowers.\n\n**Below is the full content of your 'superpowers:using-superpowers' skill - your introduction to using skills. For all other skills, use the 'Skill' tool:**\n\n${using_superpowers_escaped}\n\n${warning_escaped}${checkpoint_hint_escaped}\n</EXTREMELY_IMPORTANT>"
 
 # Output context injection as JSON.
 # Cursor hooks expect additional_context (snake_case).

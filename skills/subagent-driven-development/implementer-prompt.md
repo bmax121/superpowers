@@ -94,16 +94,50 @@ Task tool (general-purpose):
     - Do tests actually verify behavior (not just mock behavior)?
     - Did I follow TDD if required?
     - Are tests comprehensive?
+    - Did I cover the three layers (unit / integration / E2E) appropriate to this code?
+    - Did I add boundary tests (null / empty / max / invalid / date-edge) for every public function?
+    - Does this code touch concurrency or shared state? If yes, did I add a concurrency/race test with the language's race detector or stress harness (go test -race, loom, JCStress, Thread Sanitizer, etc.)?
+    - For latency-sensitive code, is there at least one benchmark/stress test with a p99 or throughput assertion?
 
     If you find issues during self-review, fix them now before reporting.
 
-    ## Report Format
+    ## Output Protocol (MACHINE-PARSEABLE HEADER REQUIRED)
 
-    When done, report:
-    - **Status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+    Your report will be parsed by the controller regardless of which model
+    or CLI wrapper ran you. You MUST emit a structured header followed by a
+    marker line, then free-form narrative. The header is required even for
+    BLOCKED and NEEDS_CONTEXT statuses.
+
+    **Required format — start your report with EXACTLY these lines, in order:**
+
+    ```
+    Status: DONE
+    Files: path/to/a.ts, path/to/b.ts
+    Tests: 5/5 passing
+    Concerns: (none)
+    ---REPORT---
+    <free-form narrative follows>
+    ```
+
+    Rules:
+    - `Status:` must be one of `DONE` | `DONE_WITH_CONCERNS` | `BLOCKED` | `NEEDS_CONTEXT`
+    - `Files:` is a comma-separated list of changed paths, or `(none)` if blocked
+    - `Tests:` is `N/M passing` or `(not applicable)` — never omit the line
+    - `Concerns:` is a short inline phrase or `(none)`; long concerns go below `---REPORT---`
+    - The `---REPORT---` marker is literal and always present
+    - Nothing before `Status:` — no preamble, no "Here's the report:", no markdown code fence
+
+    Why this format: any runtime (Anthropic Agent tool, Codex CLI, GLM CLI,
+    etc.) can produce it, and the controller can grep `^Status:` without
+    trying to parse markdown. Violating the format looks like BLOCKED from
+    the controller's side and triggers provider fallback — so follow it.
+
+    ## Report Content (below the ---REPORT--- marker)
+
+    Narrative covers:
     - What you implemented (or what you attempted, if blocked)
-    - What you tested and test results
-    - Files changed
+    - What you tested and test results (including boundary / concurrency / stress tests if applicable — see test-driven-development skill's coverage layers)
+    - Files changed with one-line rationale each
     - Self-review findings (if any)
     - Any issues or concerns
 

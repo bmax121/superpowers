@@ -45,75 +45,266 @@ digraph process {
 
     subgraph cluster_per_task {
         label="Per Task";
-        "Dispatch implementer subagent (./implementer-prompt.md)" [shape=box];
-        "Implementer subagent asks questions?" [shape=diamond];
+        "Route task to provider (tier → models.yaml)" [shape=box];
+        "Dispatch implementer via chosen provider" [shape=box];
+        "Implementer asks questions?" [shape=diamond];
         "Answer questions, provide context" [shape=box];
-        "Implementer subagent implements, tests, commits, self-reviews" [shape=box];
-        "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [shape=box];
-        "Spec reviewer subagent confirms code matches spec?" [shape=diamond];
-        "Implementer subagent fixes spec gaps" [shape=box];
-        "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [shape=box];
-        "Code quality reviewer subagent approves?" [shape=diamond];
-        "Implementer subagent fixes quality issues" [shape=box];
+        "Implementer implements, tests, commits, self-reviews" [shape=box];
+        "Dispatch spec reviewer" [shape=box];
+        "Spec reviewer confirms code matches spec?" [shape=diamond];
+        "Implementer fixes spec gaps" [shape=box];
+        "Dispatch code quality reviewer" [shape=box];
+        "Code quality reviewer approves?" [shape=diamond];
+        "Implementer fixes quality issues" [shape=box];
 
         subgraph cluster_external {
             label="Stage 3: External Review Loop";
             "Dispatch Reviewer A + Reviewer B in parallel" [shape=box];
-            "Triage feedback (Valid/Rejected/Discuss)" [shape=box];
-            "User confirms triage" [shape=diamond];
+            "Auto-triage per rules, append decisions_log" [shape=box];
+            "Any issues judged Valid?" [shape=diamond];
             "Dispatch implementer to fix valid issues" [shape=box];
         }
 
-        "Mark task complete in TodoWrite" [shape=box];
+        "Mark task complete in TodoWrite + write checkpoint" [shape=box style=filled fillcolor=lightyellow];
+        "Score next-task relatedness, pick threshold (30/50/70)" [shape=box];
+        "Recompute context estimate. pct >= threshold?" [shape=diamond];
+        "Emit Resume Prompt, stop session" [shape=box style=filled fillcolor=lightcoral];
     }
 
-    "Detect Reviewer B (once at plan start)" [shape=box];
-    "Read plan, extract all tasks with full text, note context, create TodoWrite" [shape=box];
+    "Provider detection + Reviewer B detection (plan start)" [shape=box];
+    "Read plan, extract tasks, seed checkpoint" [shape=box];
+    "Existing unfinished checkpoint?" [shape=diamond];
+    "Resume from checkpoint (long-context-checkpoint skill)" [shape=box];
     "More tasks remain?" [shape=diamond];
-    "Dispatch final code reviewer subagent for entire implementation" [shape=box];
+    "Dispatch final code reviewer for entire implementation" [shape=box];
     "Use superpowers:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
-    "Read plan, extract all tasks with full text, note context, create TodoWrite" -> "Detect Reviewer B (once at plan start)";
-    "Detect Reviewer B (once at plan start)" -> "Dispatch implementer subagent (./implementer-prompt.md)";
-    "Dispatch implementer subagent (./implementer-prompt.md)" -> "Implementer subagent asks questions?";
-    "Implementer subagent asks questions?" -> "Answer questions, provide context" [label="yes"];
-    "Answer questions, provide context" -> "Dispatch implementer subagent (./implementer-prompt.md)";
-    "Implementer subagent asks questions?" -> "Implementer subagent implements, tests, commits, self-reviews" [label="no"];
-    "Implementer subagent implements, tests, commits, self-reviews" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)";
-    "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" -> "Spec reviewer subagent confirms code matches spec?";
-    "Spec reviewer subagent confirms code matches spec?" -> "Implementer subagent fixes spec gaps" [label="no"];
-    "Implementer subagent fixes spec gaps" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [label="re-review"];
-    "Spec reviewer subagent confirms code matches spec?" -> "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [label="yes"];
-    "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" -> "Code quality reviewer subagent approves?";
-    "Code quality reviewer subagent approves?" -> "Implementer subagent fixes quality issues" [label="no"];
-    "Implementer subagent fixes quality issues" -> "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [label="re-review"];
-    "Code quality reviewer subagent approves?" -> "Dispatch Reviewer A + Reviewer B in parallel" [label="yes"];
-    "Dispatch Reviewer A + Reviewer B in parallel" -> "Triage feedback (Valid/Rejected/Discuss)";
-    "Triage feedback (Valid/Rejected/Discuss)" -> "User confirms triage";
-    "User confirms triage" -> "Mark task complete in TodoWrite" [label="all approved, rejected, or discussed"];
-    "User confirms triage" -> "Dispatch implementer to fix valid issues" [label="has valid issues"];
-    "Dispatch implementer to fix valid issues" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [label="re-run internal reviews"];
-    "Mark task complete in TodoWrite" -> "More tasks remain?";
-    "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
-    "More tasks remain?" -> "Dispatch final code reviewer subagent for entire implementation" [label="no"];
-    "Dispatch final code reviewer subagent for entire implementation" -> "Use superpowers:finishing-a-development-branch";
+    "Read plan, extract tasks, seed checkpoint" -> "Existing unfinished checkpoint?";
+    "Existing unfinished checkpoint?" -> "Resume from checkpoint (long-context-checkpoint skill)" [label="yes"];
+    "Existing unfinished checkpoint?" -> "Provider detection + Reviewer B detection (plan start)" [label="no"];
+    "Resume from checkpoint (long-context-checkpoint skill)" -> "Route task to provider (tier → models.yaml)";
+    "Provider detection + Reviewer B detection (plan start)" -> "Route task to provider (tier → models.yaml)";
+    "Route task to provider (tier → models.yaml)" -> "Dispatch implementer via chosen provider";
+    "Dispatch implementer via chosen provider" -> "Implementer asks questions?";
+    "Implementer asks questions?" -> "Answer questions, provide context" [label="yes"];
+    "Answer questions, provide context" -> "Dispatch implementer via chosen provider";
+    "Implementer asks questions?" -> "Implementer implements, tests, commits, self-reviews" [label="no"];
+    "Implementer implements, tests, commits, self-reviews" -> "Dispatch spec reviewer";
+    "Dispatch spec reviewer" -> "Spec reviewer confirms code matches spec?";
+    "Spec reviewer confirms code matches spec?" -> "Implementer fixes spec gaps" [label="no"];
+    "Implementer fixes spec gaps" -> "Dispatch spec reviewer" [label="re-review"];
+    "Spec reviewer confirms code matches spec?" -> "Dispatch code quality reviewer" [label="yes"];
+    "Dispatch code quality reviewer" -> "Code quality reviewer approves?";
+    "Code quality reviewer approves?" -> "Implementer fixes quality issues" [label="no"];
+    "Implementer fixes quality issues" -> "Dispatch code quality reviewer" [label="re-review"];
+    "Code quality reviewer approves?" -> "Dispatch Reviewer A + Reviewer B in parallel" [label="yes"];
+    "Dispatch Reviewer A + Reviewer B in parallel" -> "Auto-triage per rules, append decisions_log";
+    "Auto-triage per rules, append decisions_log" -> "Any issues judged Valid?";
+    "Any issues judged Valid?" -> "Dispatch implementer to fix valid issues" [label="yes"];
+    "Any issues judged Valid?" -> "Mark task complete in TodoWrite + write checkpoint" [label="no"];
+    "Dispatch implementer to fix valid issues" -> "Dispatch spec reviewer" [label="re-run internal reviews"];
+    "Mark task complete in TodoWrite + write checkpoint" -> "Score next-task relatedness, pick threshold (30/50/70)";
+    "Score next-task relatedness, pick threshold (30/50/70)" -> "Recompute context estimate. pct >= threshold?";
+    "Recompute context estimate. pct >= threshold?" -> "Emit Resume Prompt, stop session" [label="yes"];
+    "Recompute context estimate. pct >= threshold?" -> "More tasks remain?" [label="no"];
+    "More tasks remain?" -> "Route task to provider (tier → models.yaml)" [label="yes"];
+    "More tasks remain?" -> "Dispatch final code reviewer for entire implementation" [label="no"];
+    "Dispatch final code reviewer for entire implementation" -> "Use superpowers:finishing-a-development-branch";
 }
 ```
 
+## Plan Start Initialization (one-time ask, first run only)
+
+Before Reviewer B / provider detection, **on the very first run for a plan**
+(no existing checkpoint), the controller asks the user ONE question with
+four answers — this is one of the hard gates where asking is required
+because the choice shapes the whole run's cost and safety profile.
+
+**Skip the question entirely when:**
+- A checkpoint already exists with `execution_mode` set — reuse it.
+- The environment variable `SUPERPOWERS_AUTONOMOUS_LOOP=1` is set — the
+  outer script has already chosen autonomous mode on behalf of the user,
+  and the checkpoint either exists (resume path) or will be seeded with
+  `execution_mode: "autonomous"` based on env.
+
+This is what makes autonomous mode safe: the human makes the choice **once**
+(either interactively via AskUserQuestion, or explicitly by launching
+`scripts/run-plan-autonomous.sh`), and the choice is recorded. Every
+subsequent session reads the checkpoint and does NOT re-ask.
+
+**AskUserQuestion:**
+
+> "Execution mode for this plan?"
+> 1. **Interactive (default)** — I emit a Resume Prompt when context budget is reached; you open a new session and type `/resume-plan` to continue. Safe, visible, interruptible.
+> 2. **Autonomous loop** — on handoff I write the checkpoint and exit; an outer script (`scripts/run-plan-autonomous.sh`) spawns a fresh session automatically until the plan finishes or hits a limit. Faster, but you won't see every step in real time.
+
+If the user picks **Autonomous loop**, ask three more (multi-select OK, sensible defaults offered):
+
+- `Max total cost (USD)` — default **20**. Hard cap enforced via `--max-budget-usd`.
+- `Max consecutive handoffs` — default **10**. Prevents runaway loops.
+- `No-progress abort` — default **2**. If N handoffs pass with zero new tasks completed, the loop stops.
+
+Store the answers in the initial checkpoint:
+
+```json
+"execution_mode": "interactive",       // or "autonomous"
+"autonomous_limits": {                 // only present if autonomous
+  "max_cost_usd": 20,
+  "max_handoffs": 10,
+  "no_progress_abort_after": 2
+}
+```
+
+If the user picks Interactive, `autonomous_limits` is omitted entirely and
+the controller behaves as currently documented (emit Resume Prompt, stop).
+
+If the user picks Autonomous, the controller's handoff behavior changes —
+see `long-context-checkpoint` skill → "Autonomous Loop Mode" for the
+protocol.
+
+## Checkpoint State Goes on Disk but NOT in Git
+
+Checkpoints are per-machine, per-session execution state. They reference
+absolute paths, session UUIDs, and timestamps. **They must not be committed.**
+
+On the **first** checkpoint write in a new repo, the controller creates
+`docs/superpowers/checkpoints/.gitignore` with:
+
+```
+# superpowers: checkpoints are runtime state, not source
+*
+!.gitignore
+!README.md
+```
+
+And (if user hasn't created it already) `docs/superpowers/checkpoints/README.md`:
+
+```markdown
+# Checkpoints
+
+Runtime state from `superpowers:long-context-checkpoint`. Not checked in.
+Safe to delete once the corresponding plan is finished.
+```
+
+This puts checkpoints alongside `specs/` and `plans/` (which ARE in git) but
+keeps the runtime artifacts out of commits.
+
+## Checkpoint Integration
+
+This skill is paired with [`superpowers:long-context-checkpoint`](../long-context-checkpoint/SKILL.md). The controller MUST:
+
+1. **At plan start** — before Reviewer B detection, check for an unfinished checkpoint at `docs/superpowers/checkpoints/<plan-basename>-checkpoint.json`. If present with any task `status != "done"`, invoke `long-context-checkpoint` to resume (skip fresh provider/Reviewer B detection; reuse cached values).
+2. **After Reviewer B + provider detection** — write the initial checkpoint with `provider_availability`, `reviewer_b_detected`, plan path, worktree, empty task list.
+3. **After every task's `Mark task complete` step** — rewrite checkpoint with updated `tasks[].status`, `commit`, `triage_decisions`, and updated `todos`.
+4. **After every auto-triage decision** — append one entry to `decisions_log` and rewrite.
+5. **After every provider fallback event** — append one entry to `decisions_log` and rewrite.
+6. **After every checkpoint write** — (a) recompute `last_context_estimate_pct` per the formula in `long-context-checkpoint` skill, (b) score the NEXT pending task's relatedness to the current session (high/medium/low) and pick the corresponding threshold (70/50/30), (c) if `pct >= threshold`, emit the Resume Prompt and stop. The relatedness rationale goes in the checkpoint for audit. See `long-context-checkpoint` skill → "Handoff Threshold (relatedness-aware)" for the full scoring rubric.
+
+Never treat the checkpoint as optional. If the write fails (disk full, permissions), stop and surface the error — do not continue without durable state.
+
 ## Model Selection
 
-Use the least powerful model that can handle each role to conserve cost and increase speed.
+Model routing is declarative. The mapping from **tier → ordered (provider, model) chain** lives in [`../../config/models.yaml`](../../config/models.yaml). The controller does NOT hardcode model names in dispatch code. The yaml is the source of truth; you edit it to add new models.
 
-**Mechanical implementation tasks** (isolated functions, clear specs, 1-2 files): use a fast, cheap model. Most implementation tasks are mechanical when the plan is well-specified.
+**Tier definitions** (what goes in a task's tier):
+- **mechanical** — isolated functions, clear specs, 1-2 files. Optimize for cost/speed.
+- **integration** — multi-file coordination, pattern matching, debugging. Needs judgment.
+- **architecture** — design decisions, broad codebase understanding, reviews. Most capable model.
 
-**Integration and judgment tasks** (multi-file coordination, pattern matching, debugging): use a standard model.
+**Signals for auto-classification** (when a task card doesn't declare `**Tier:**` explicitly):
+- Touches 1-2 files with a complete spec → **mechanical**
+- Touches multiple files with integration concerns → **integration**
+- Requires design judgment or broad codebase understanding → **architecture**
 
-**Architecture, design, and review tasks**: use the most capable available model.
+### Controller Flow at Plan Start
 
-**Task complexity signals:**
-- Touches 1-2 files with a complete spec → cheap model
-- Touches multiple files with integration concerns → standard model
-- Requires design judgment or broad codebase understanding → most capable model
+```
+1. Bash scripts/detect-model-providers.sh → parse final JSON line
+   → cache `provider_availability` in checkpoint (see long-context-checkpoint skill)
+2. For each task:
+   a. Read tier (from task card OR auto-classify by signals above)
+   b. Walk models.yaml tiers[<tier>] top-to-bottom; pick first entry whose
+      provider is `available: true`
+   c. Dispatch via that provider (see next section for per-provider mechanics)
+   d. If dispatch fails (non-zero exit, missing Status header, provider
+      crash): fall to the next entry; log the fallback to
+      checkpoint.decisions_log (see long-context-checkpoint skill)
+```
+
+The controller MUST print a one-line routing decision before dispatch, e.g.:
+
+```
+─── Task 2/5 routing ───
+  Tier: mechanical → provider: anthropic, model: haiku
+```
+
+This makes it obvious in the transcript which model wrote which code.
+
+## Implementer Provider Fallback
+
+Different provider types are dispatched differently. Both surfaces must end in the same structured report (see `implementer-prompt.md` Output Protocol).
+
+### `agent_tool` (Claude Code's built-in Agent tool)
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  model: "<model from tier entry>",   # e.g. "haiku", "sonnet", "opus"
+  description: "Implement Task N: <name>",
+  prompt: <rendered implementer-prompt.md>
+)
+```
+
+Parse the agent's final message for the `Status: ...` header.
+
+### `cli_wrapper` (any CLI that accepts a prompt file and writes an output file)
+
+```bash
+# 1. Render the implementer prompt to a temp file
+PROMPT_FILE=$(mktemp -t impl-XXXXX).md
+OUTPUT_FILE=$(mktemp -t impl-XXXXX).out
+STDERR_FILE=$(mktemp -t impl-XXXXX).err
+cat > "$PROMPT_FILE" <<'EOF'
+<rendered implementer-prompt.md>
+EOF
+
+# 2. Expand provider.command template with {model}, {prompt_file}, {output_file}
+CMD="$(echo "$TEMPLATE" | sed \
+  -e "s|{model}|$MODEL|g" \
+  -e "s|{prompt_file}|$PROMPT_FILE|g" \
+  -e "s|{output_file}|$OUTPUT_FILE|g")"
+
+# 3. Run. CAPTURE STDERR separately — some CLIs (e.g. codex when it hits a
+#    usage limit) exit 0 but write the error to stderr and leave the output
+#    file empty. We need the stderr text for decisions_log so we know WHY a
+#    fallback happened, not just that it did.
+bash -c "$CMD" 2> "$STDERR_FILE"
+RC=$?
+
+# 4. Validate ALL of:
+#    (a) rc == 0
+#    (b) output file exists and is non-empty
+#    (c) output starts with "Status: DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT"
+if [[ $RC -ne 0 ]] \
+   || [[ ! -s "$OUTPUT_FILE" ]] \
+   || ! grep -q "^Status: \(DONE\|DONE_WITH_CONCERNS\|BLOCKED\|NEEDS_CONTEXT\)" "$OUTPUT_FILE"; then
+  # Record fallback with the actual reason (rc + first line of stderr)
+  REASON="rc=$RC"
+  if [[ -s "$STDERR_FILE" ]]; then
+    REASON="$REASON; stderr=$(head -c 200 "$STDERR_FILE")"
+  fi
+  echo "[routing] provider $PROVIDER failed ($REASON) — falling back"
+  # → write decisions_log entry: stage=provider_fallback, event="$REASON"
+fi
+```
+
+The controller reads `$OUTPUT_FILE` and treats it the same as an agent_tool
+return. The `$STDERR_FILE` is not passed forward to the next stage — it's
+only for the fallback reason recorded in `decisions_log`.
+
+### Routing Failure Escalation
+
+If every provider in a tier's chain fails, this is a **hard gate** — the controller MUST stop and surface the failures to the user. Do not silently downgrade the task; do not invent a different tier. Report which providers failed and why, and let the user decide (install a missing CLI, fix config, re-tier the task, abort).
 
 ## Handling Implementer Status
 
@@ -309,12 +500,12 @@ Implementer:
   │    Minor: Consider extracting progress utility
   └─ Reviewer B (Codex/GPT): ✅ Approved — no issues found
 
-─── Triaging external review feedback ───
+─── Auto-triaging external review feedback ───
   Reviewer A (Sonnet): 1 issue
-    1. [Minor] Extract progress utility → ❌ Rejected: YAGNI, only used once
-  User confirms: proceed
+    1. [Minor] Extract progress utility → ❌ Rejected (YAGNI — used once in this module)
+  Decisions: 0 valid, 1 rejected, 0 deferred. Logged to checkpoint.decisions_log.
 
-✅ Task 2 complete
+✅ Task 2 complete (checkpoint written; context estimate 18%)
 
 ...
 
@@ -335,39 +526,63 @@ After internal reviews (spec compliance + code quality) pass, the controller dis
 
 **Parallel execution:** Reviewer A (Agent tool) and Reviewer B (Skill/Bash/Agent tool) dispatch in the same message for concurrent execution.
 
-### Feedback Triage
+### Autonomous Feedback Triage
 
-External reviewer feedback is **not automatically trusted**. The controller must evaluate each issue before acting.
+External reviewer feedback is **not automatically trusted**, but it is also
+**not user-gated**. The controller triages every issue by the rules below,
+logs every decision to `checkpoint.decisions_log` (append-only), and moves
+on. The user audits the log after the fact; they are not interrupted in the
+middle.
 
-**Output format:**
+This is a deliberate design choice for long-running plans: real-time
+confirmation turns every task into a 5-minute dialogue. The decision
+log preserves the same information with zero interruption cost and a
+better paper trail.
+
+**Decision matrix:**
+
+| Reviewer finding | Auto-decision |
+|---|---|
+| `Critical` or `Important` + touches security / correctness / data loss | **Valid** → dispatch implementer to fix |
+| `Critical` or `Important` + controller cannot determine validity (reviewer citing code it can't reconcile with) | **Deferred** → add to `open_questions`, task completes with ⚠ note |
+| `Minor` / `Style` + conflicts with a visible project convention | **Rejected** → log conflict + rationale |
+| `Minor` / `Style` + no conflict, small fix | **Valid** → dispatch fix |
+| `Minor` / `Style` + no conflict, would require ≥ 30 lines to "fix" | **Rejected** (YAGNI) |
+| Reviewer cites wrong assumption / misread API / wrong file | **Rejected** → log the misread |
+| Pure design trade-off with no clearly-better answer | **Deferred** → `open_questions`, continue |
+
+**`decisions_log` entry format** (one per reviewer finding):
+
+```json
+{
+  "ts":        "2026-04-13T14:22:10Z",
+  "task":      2,
+  "stage":     "external_review_triage",
+  "reviewer":  "sonnet",
+  "issue":     "Minor: extract progress utility",
+  "decision":  "rejected",
+  "rationale": "YAGNI — progress printer is used once; extraction would add an indirection with no callers"
+}
 ```
-─── Triaging external review feedback ───
-  Reviewer A (Sonnet): 2 issues
-    1. [Important] Race condition in cache access → ✅ Valid, dispatching fix
-    2. [Minor] Variable naming style → ❌ Rejected: matches project convention
-  Reviewer B (Codex/GPT): 1 issue
-    1. [Important] Missing null check on line 45 → ⚠ Discuss: function is internal-only, caller guarantees non-null
-```
-
-**Triage categories:**
-- **Valid** → accept, dispatch implementer to fix
-- **Rejected** → explain why (wrong assumption, matches existing convention, etc.), skip
-- **Discuss** → present to user with controller's assessment, let user decide
-
-**Triage criteria:**
-- Does the issue identify a real bug or security problem? → likely valid
-- Does the reviewer misunderstand project conventions or constraints? → likely reject
-- Is the reviewer applying generic best practices that don't fit this context? → likely reject
-- Is the issue about a design trade-off with no clear right answer? → discuss with user
 
 **After triage:**
-1. Controller presents triage results to user with reasoning for each decision
-2. User confirms or overrides any triage decisions
-3. Controller dispatches implementer subagent to fix only the accepted issues
-4. Re-runs internal reviews (Stage 1 + 2) on the fix
-5. Re-runs Stage 3 with both external reviewers
+1. Controller prints one-line summary: `Decisions: N valid, M rejected, K deferred. Full log: <checkpoint>.decisions_log`
+2. Controller writes checkpoint (decisions_log appended, open_questions updated).
+3. If any `valid` → dispatch implementer subagent to fix those only, re-run internal reviews (Stage 1+2), then re-run Stage 3.
+4. If zero `valid` → mark task complete, recompute context estimate, proceed.
 
-**Exit condition:** Both reviewers approve, OR all remaining issues have been triaged as rejected/discussed and user has confirmed.
+**Exit condition:** No issues remain in `valid` state (either all fixed and re-approved, or all rejected/deferred).
+
+### When to Escalate to the User (hard gates)
+
+The controller asks the user ONLY in these cases:
+
+- **Operation on `main`/`master`** — always ask before merging, pushing, or rebasing.
+- **Implementer reports BLOCKED and all providers in the tier chain have been exhausted** — no fallback remains.
+- **Every external reviewer finding is deferred** (zero valid, zero rejected, all ambiguous) AND the task appears stuck — surface `open_questions` and ask for a direction.
+- **Reviewer A and Reviewer B actively contradict** on a `Critical` finding (one says "must fix", other says "must not fix") — truly ambiguous; user decides.
+
+Everything else: decide, log, proceed.
 
 ### External Review Example
 
@@ -379,13 +594,11 @@ External reviewer feedback is **not automatically trusted**. The controller must
   │    Important: Race condition in concurrent access to shared cache (utils.ts:45)
   └─ Reviewer B (Codex/GPT): ✅ Approved
 
-─── Triaging external review feedback ───
+─── Auto-triaging external review feedback ───
   Reviewer A (Sonnet): 1 issue
-    1. [Important] Race condition in cache access → ✅ Valid
+    1. [Important] Race condition in cache access → ✅ Valid (correctness issue; dispatching fix)
   Reviewer B (Codex/GPT): 0 issues
-
-  Presenting triage to user...
-  User confirms: proceed with fix
+  Decisions: 1 valid, 0 rejected, 0 deferred. Logged to checkpoint.decisions_log.
 
   Dispatching implementer to fix...
 
@@ -458,8 +671,10 @@ External reviewer feedback is **not automatically trusted**. The controller must
 - **Send unfixed internal review issues to external review** (fix internal issues first)
 - **Skip Reviewer B detection** (run it once at plan start, cache the result)
 - **Omit stage markers** (user must see which stage is active at all times)
-- **Blindly accept external review feedback** (triage first — external models may misunderstand project conventions)
-- **Skip user confirmation on triage** (user must confirm valid/rejected/discuss decisions)
+- **Blindly accept external review feedback** (auto-triage each issue by the rules in Autonomous Feedback Triage — external models may misunderstand project conventions)
+- **Skip logging triage decisions** (every decision must land in `checkpoint.decisions_log` — that log IS the user's audit path, so if you skip logging you have effectively hidden the decision)
+- **Interrupt the user mid-task to confirm a triage** (default is autonomous; only escalate on the four hard gates listed in "When to Escalate to the User")
+- **Skip writing the checkpoint after a task completes** (the checkpoint is the only durable state; subagents are fresh per task, so if you don't write, it's gone)
 
 **If subagent asks questions:**
 - Answer clearly and completely
