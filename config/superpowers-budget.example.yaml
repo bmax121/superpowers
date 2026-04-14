@@ -1,0 +1,14 @@
+# Example ~/.claude/superpowers-budget.yaml
+#
+# Copy this file to ~/.claude/superpowers-budget.yaml and edit.
+# Superpowers reads it to compute the percent-of-weekly budget used by
+# scripts/run-plan-autonomous.sh (--budget-pct). Anthropic does not expose
+# your plan's dollar cap via any API, so you write it here.
+
+# Dollar cap for the rolling 7-day window. Set to null for unlimited mode
+# (run-plan-autonomous.sh will refuse --budget-pct and require either
+# --budget-cap-usd or unlimited mode explicitly).
+weekly_cap_usd: 200
+
+# Optional: change the rolling window. Default 7 days.
+# window_days: 7
