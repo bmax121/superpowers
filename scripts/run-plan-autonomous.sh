@@ -33,7 +33,9 @@
 set -euo pipefail
 
 # ---- defaults ----
-MAX_COST_USD=20
+BUDGET_PCT=""                  # empty = unset, "none" = unlimited, or number 1-100
+BUDGET_CAP_USD=""              # empty = unset; overrides percent when set
+MAX_COST_USD=""                # deprecated; still parsed but treated as budget-cap-usd + warning
 MAX_HANDOFFS=10
 NO_PROGRESS_ABORT=2
 LOG_DIR=""
@@ -54,20 +56,35 @@ usage() {
 # ---- arg parsing ----
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --budget-pct)          BUDGET_PCT="$2"; shift 2 ;;
+    --budget-cap-usd)      BUDGET_CAP_USD="$2"; shift 2 ;;
     --max-cost)            MAX_COST_USD="$2"; shift 2 ;;
     --max-handoffs)        MAX_HANDOFFS="$2"; shift 2 ;;
     --no-progress-abort)   NO_PROGRESS_ABORT="$2"; shift 2 ;;
     --log-dir)             LOG_DIR="$2"; shift 2 ;;
     --dry-run)             DRY_RUN=1; shift ;;
     -h|--help)             usage 0 ;;
-    -*)
-      echo "ERROR: unknown option $1" >&2; usage 3 ;;
+    -*)                    echo "ERROR: unknown option $1" >&2; usage 3 ;;
     *)
       if [[ -z "$INPUT" ]]; then INPUT="$1"; shift
       else echo "ERROR: multiple positional args" >&2; usage 3
       fi ;;
   esac
 done
+
+# Handle deprecated --max-cost: treat as --budget-cap-usd, warn.
+if [[ -n "$MAX_COST_USD" ]]; then
+  echo "[deprecated] --max-cost is deprecated; treating as --budget-cap-usd $MAX_COST_USD. Prefer --budget-pct against ~/.claude/superpowers-budget.yaml. --max-cost will be removed in 7.0.0." >&2
+  if [[ -z "$BUDGET_CAP_USD" ]]; then
+    BUDGET_CAP_USD="$MAX_COST_USD"
+  fi
+fi
+
+# Reject conflicting budget inputs
+if [[ -n "$BUDGET_PCT" && -n "$BUDGET_CAP_USD" ]]; then
+  echo "ERROR: --budget-pct and --budget-cap-usd are mutually exclusive" >&2
+  exit 3
+fi
 
 if [[ -z "$INPUT" ]]; then
   echo "ERROR: missing <plan-or-checkpoint>" >&2
@@ -166,6 +183,47 @@ PY
 count_done_tasks()  { _count_with_status "$CHECKPOINT" "done"; }
 count_total_tasks() { _count_with_status "$CHECKPOINT" "*"; }
 
+# ---- budget helpers ----
+# Emit one line: "budget_pct=<n>|none|unset; cap=<usd>|unset; spent=<usd>; limit=<usd>|inf"
+# Returns 0 if run should proceed, 1 if over budget.
+check_budget() {
+  local pct="$1" cap="$2"
+  local spent limit_usd
+  local weekly_json
+  weekly_json=$(bash "$(dirname "${BASH_SOURCE[0]}")/compute-weekly-spent.sh" 2>/dev/null || echo '{"weekly_spent_usd":0}')
+  spent=$(echo "$weekly_json" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("weekly_spent_usd",0))')
+
+  if [[ "$pct" == "none" ]]; then
+    echo "[budget] budget_pct=unlimited cap=unset spent=\$$spent limit=inf"
+    return 0
+  elif [[ -n "$pct" ]]; then
+    local cap_usd
+    cap_usd=$(echo "$weekly_json" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("weekly_cap_usd",""))')
+    if [[ -z "$cap_usd" ]]; then
+      echo "ERROR: --budget-pct requires weekly_cap_usd in ~/.claude/superpowers-budget.yaml" >&2
+      return 1
+    fi
+    limit_usd=$(python3 -c "print($cap_usd * $pct / 100.0)")
+    echo "[budget] budget_pct=$pct cap=\$$cap_usd spent=\$$spent limit=\$$limit_usd"
+    if (( $(python3 -c "print(1 if $spent >= $limit_usd else 0)") )); then
+      echo "[budget] ❌ weekly spend \$$spent exceeded limit \$$limit_usd (budget_pct=$pct of cap \$$cap_usd) — plan status = budget_exhausted" >&2
+      return 1
+    fi
+    return 0
+  elif [[ -n "$cap" ]]; then
+    echo "[budget] budget_pct=unset cap=\$$cap spent=\$$spent limit=\$$cap"
+    if (( $(python3 -c "print(1 if $spent >= $cap else 0)") )); then
+      echo "[budget] ❌ weekly spend \$$spent exceeded cap \$$cap — plan status = budget_exhausted" >&2
+      return 1
+    fi
+    return 0
+  else
+    # No budget constraint set → behave like unlimited (legacy default 20 USD is gone)
+    echo "[budget] budget_pct=unset cap=unset spent=\$$spent limit=inf"
+    return 0
+  fi
+}
+
 cleanup() {
   echo "" >&2
   echo "[autonomous-loop] interrupted — checkpoint preserved at $CHECKPOINT" >&2
@@ -176,13 +234,18 @@ trap cleanup INT TERM
 # ---- main loop ----
 SESSION_N=0
 NO_PROGRESS=0
-REMAINING_BUDGET="$MAX_COST_USD"
 PREV_DONE=$(count_done_tasks)
+SPENT_SO_FAR=0
 
-echo "[autonomous-loop] start. checkpoint=$CHECKPOINT budget=\$${MAX_COST_USD} max_handoffs=$MAX_HANDOFFS" >&2
+echo "[autonomous-loop] start. checkpoint=$CHECKPOINT budget_pct=${BUDGET_PCT:-unset} budget_cap=${BUDGET_CAP_USD:-unset} max_handoffs=$MAX_HANDOFFS" >&2
 
 while [[ $SESSION_N -lt $MAX_HANDOFFS ]]; do
   SESSION_N=$((SESSION_N + 1))
+
+  # Budget gate — runs every iteration
+  if ! check_budget "$BUDGET_PCT" "$BUDGET_CAP_USD" >&2; then
+    exit 1
+  fi
 
   # Completion check (before spawning — if already done, exit clean)
   if [[ -f "$CHECKPOINT" ]]; then
@@ -194,27 +257,27 @@ while [[ $SESSION_N -lt $MAX_HANDOFFS ]]; do
     fi
   fi
 
-  # Allocate per-session budget (remaining / expected remaining handoffs, min $1)
-  remaining_handoffs=$((MAX_HANDOFFS - SESSION_N + 1))
-  per_session_budget=$(awk -v r="$REMAINING_BUDGET" -v h="$remaining_handoffs" \
-    'BEGIN { v = r / h; if (v < 1) v = 1; printf "%.2f", v }')
-
   SESSION_UUID=$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')
   LOG_FILE="$LOG_DIR/session-$(printf '%03d' "$SESSION_N")-${SESSION_UUID}.log"
 
-  echo "[autonomous-loop] session $SESSION_N/$MAX_HANDOFFS: uuid=$SESSION_UUID budget=\$$per_session_budget log=$LOG_FILE" >&2
+  per_session_budget=""
+  if [[ -n "$BUDGET_CAP_USD" ]]; then
+    # Divide remaining cap across remaining handoffs (floor $1).
+    remaining=$((MAX_HANDOFFS - SESSION_N + 1))
+    per_session_budget=$(python3 -c "print(max(1.0, ($BUDGET_CAP_USD - ${SPENT_SO_FAR:-0}) / $remaining))")
+  fi
+
+  echo "[autonomous-loop] session $SESSION_N/$MAX_HANDOFFS: uuid=$SESSION_UUID log=$LOG_FILE${per_session_budget:+ budget=\$$per_session_budget}" >&2
 
   if [[ $DRY_RUN -eq 1 ]]; then
-    echo "[dry-run] would spawn: claude -p --session-id $SESSION_UUID --max-budget-usd $per_session_budget --dangerously-skip-permissions --output-format stream-json -- '$INITIAL_PROMPT'" >&2
+    echo "[dry-run] would spawn: claude -p --session-id $SESSION_UUID ${per_session_budget:+--max-budget-usd $per_session_budget} --dangerously-skip-permissions --output-format stream-json -- '$INITIAL_PROMPT'" >&2
   else
+    claude_args=(-p --session-id "$SESSION_UUID" --dangerously-skip-permissions --output-format stream-json --include-partial-messages)
+    if [[ -n "$per_session_budget" ]]; then
+      claude_args+=(--max-budget-usd "$per_session_budget")
+    fi
     SUPERPOWERS_AUTONOMOUS_LOOP=1 \
-      claude -p \
-        --session-id "$SESSION_UUID" \
-        --max-budget-usd "$per_session_budget" \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --include-partial-messages \
-        -- "$INITIAL_PROMPT" \
+      claude "${claude_args[@]}" -- "$INITIAL_PROMPT" \
       > "$LOG_FILE" 2>&1 || {
         rc=$?
         echo "[autonomous-loop] session $SESSION_N exited rc=$rc (may be budget-limit; continuing to inspect checkpoint)" >&2
@@ -251,15 +314,6 @@ while [[ $SESSION_N -lt $MAX_HANDOFFS ]]; do
     NO_PROGRESS=0
   fi
   PREV_DONE=$done_n
-
-  # Budget tracking is approximate — claude -p's exact spend isn't easily
-  # readable from here, so we subtract the per-session cap as a worst case.
-  REMAINING_BUDGET=$(awk -v r="$REMAINING_BUDGET" -v s="$per_session_budget" \
-    'BEGIN { v = r - s; if (v < 0) v = 0; printf "%.2f", v }')
-  if [[ "$(awk -v v="$REMAINING_BUDGET" 'BEGIN { print (v <= 0) }')" -eq 1 ]]; then
-    echo "[autonomous-loop] ❌ budget exhausted" >&2
-    exit 1
-  fi
 
   # For resume iterations, prompt becomes /resume-plan
   INITIAL_PROMPT="/resume-plan $CHECKPOINT"
