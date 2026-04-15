@@ -212,13 +212,10 @@ rejected/deferred (with audit trail).
 
 ## Migration from three-stage
 
-The legacy three prompts remain in the directory but are not invoked
-by 6.2.0+ controllers:
+The legacy three prompts (`spec-reviewer-prompt.md`,
+`code-quality-reviewer-prompt.md`, `external-reviewer-prompt.md`)
+were removed in 6.2.0. Their dimensions are covered by:
 
-- `./spec-reviewer-prompt.md` — superseded by Dimension A
-- `./code-quality-reviewer-prompt.md` — superseded by Dimensions B/C/D/E
-- `./external-reviewer-prompt.md` — superseded by Dimension F + provider
-  routing
-
-They are kept for reference and for users running 6.0/6.1 controllers
-against new plans. They can be deleted in 7.0.0.
+- spec-reviewer → Dimension A
+- code-quality-reviewer → Dimensions B/C/D/E
+- external reviewer A+B → Dimension F + reviewer-tier provider routing

@@ -415,18 +415,11 @@ the user real-time visibility.
 
 ## Prompt Templates
 
-- `./implementer-prompt.md` - Dispatch implementer subagent
-- **`./unified-reviewer-prompt.md`** - Single-dispatch reviewer covering
+- `./implementer-prompt.md` — Dispatch implementer subagent
+- `./unified-reviewer-prompt.md` — Single-dispatch reviewer covering
   spec / quality / coverage / architecture / performance / security
-  (used since 6.2.0)
-- `./goal-judge-prompt.md` - Goal Judge subagent (custom final_goal template only)
-- `./gap-analyzer-prompt.md` - Gap Analyzer subagent (convergence loop)
-
-**Deprecated since 6.2.0** (kept for reference, not invoked by 6.2.0+ controllers):
-
-- `./spec-reviewer-prompt.md` — superseded by unified reviewer Dimension A
-- `./code-quality-reviewer-prompt.md` — superseded by Dimensions B/C/D/E
-- `./external-reviewer-prompt.md` — superseded by Dimension F + provider routing
+- `./goal-judge-prompt.md` — Goal Judge subagent (custom final_goal template only)
+- `./gap-analyzer-prompt.md` — Gap Analyzer subagent (convergence loop)
 
 ## Example Workflow
 

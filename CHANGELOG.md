@@ -37,13 +37,11 @@ subagent dispatches: **5 → 2** (60% reduction).
 
 - 6.1.0 plans run unchanged on 6.2.0 controllers. Plan format is
   unchanged.
-- Legacy prompts (`spec-reviewer-prompt.md`,
-  `code-quality-reviewer-prompt.md`, `external-reviewer-prompt.md`)
-  are prefixed with a `DEPRECATED in 6.2.0` banner and remain in
-  the directory. They will be removed in 7.0.0.
-- 6.1.0 controllers still work — they just dispatch the old chain
-  if explicitly told to. Upgrade path: nothing required, the new
-  controller picks up `unified-reviewer-prompt.md` automatically.
+- Legacy prompts removed (no compat shim):
+  `spec-reviewer-prompt.md`, `code-quality-reviewer-prompt.md`,
+  `external-reviewer-prompt.md` are deleted. Old controllers
+  referencing them by path will fail; upgrade to 6.2.0 SKILL.md
+  which references `unified-reviewer-prompt.md`.
 
 ### Cost impact
 
