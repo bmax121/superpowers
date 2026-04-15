@@ -115,52 +115,77 @@ digraph process {
 
 ## Plan Start Initialization (one-time ask, first run only)
 
-Before Reviewer B / provider detection, **on the very first run for a plan**
-(no existing checkpoint), the controller asks the user ONE question with
-four answers — this is one of the hard gates where asking is required
-because the choice shapes the whole run's cost and safety profile.
+Before Reviewer B / provider detection, **on the very first run for a
+plan** (no existing frontmatter with `plan_version` AND no existing
+checkpoint), the controller asks the user a structured AskUserQuestion.
+Skip entirely when:
 
-**Skip the question entirely when:**
-- A checkpoint already exists with `execution_mode` set — reuse it.
-- The environment variable `SUPERPOWERS_AUTONOMOUS_LOOP=1` is set — the
-  outer script has already chosen autonomous mode on behalf of the user,
-  and the checkpoint either exists (resume path) or will be seeded with
-  `execution_mode: "autonomous"` based on env.
+- Plan.md already has `plan_version` in frontmatter — reuse it.
+- `SUPERPOWERS_AUTONOMOUS_LOOP=1` is set — the outer script already chose.
+- A valid checkpoint exists — resume path.
 
-This is what makes autonomous mode safe: the human makes the choice **once**
-(either interactively via AskUserQuestion, or explicitly by launching
-`scripts/run-plan-autonomous.sh`), and the choice is recorded. Every
-subsequent session reads the checkpoint and does NOT re-ask.
+The human makes the choice **once**; every subsequent session reads the
+frontmatter (or checkpoint) and does NOT re-ask.
 
-**AskUserQuestion:**
+### Question 1 — execution mode
 
 > "Execution mode for this plan?"
-> 1. **Interactive (default)** — I emit a Resume Prompt when context budget is reached; you open a new session and type `/resume-plan` to continue. Safe, visible, interruptible.
-> 2. **Autonomous loop** — on handoff I write the checkpoint and exit; an outer script (`scripts/run-plan-autonomous.sh`) spawns a fresh session automatically until the plan finishes or hits a limit. Faster, but you won't see every step in real time.
+> - **Interactive** (default): emit Resume Prompt at handoff; you resume manually.
+> - **Autonomous**: `scripts/run-plan-autonomous.sh` drives iterations to completion.
 
-If the user picks **Autonomous loop**, ask three more (multi-select OK, sensible defaults offered):
+### Question 2 — final_goal template (required)
 
-- `Max total cost (USD)` — default **20**. Hard cap enforced via `--max-budget-usd`.
-- `Max consecutive handoffs` — default **10**. Prevents runaway loops.
-- `No-progress abort` — default **2**. If N handoffs pass with zero new tasks completed, the loop stops.
+> "What is the final goal for this plan, and how should it be verified?"
 
-Store the answers in the initial checkpoint:
+Seven templates plus `custom`:
 
-```json
-"execution_mode": "interactive",       // or "autonomous"
-"autonomous_limits": {                 // only present if autonomous
-  "max_cost_usd": 20,
-  "max_handoffs": 10,
-  "no_progress_abort_after": 2
-}
+| Template | User supplies | Verification |
+|---|---|---|
+| `all_tests_pass` | `verify_command` (e.g. `pytest -q`) | Run; exit 0 ⇒ met. |
+| `code_review_clean` | — | Final code-reviewer must return no Critical/Important. |
+| `verify_command_zero` | `verify_command` | Generic: run; exit 0 ⇒ met. |
+| `deploy_success` | `deploy_command`, `health_check_command` | Both must exit 0. |
+| `canary_clean` | `canary_command`, `canary_duration_sec` (default 300) | Command runs for duration; exit 0. |
+| `metrics_met` | `metric_query_command`, `assertion` (shell expr) | `metric_query_command \| assertion` exits 0. |
+| `custom` | `judge_rationale` (one sentence) | Goal Judge subagent (see `./goal-judge-prompt.md`). |
+
+Record the chosen template and its params in plan frontmatter under
+`final_goal:`. For programmatic templates (everything but `custom`) the
+verification is a shell command; for `custom` it is a subagent dispatch.
+
+### Question 3 — autonomous-only limits
+
+Only when the user chose autonomous mode, ask:
+
+> "Autonomous run limits (defaults in parens):"
+> - `budget_pct` (30) — % of weekly cap from `~/.claude/superpowers-budget.yaml`. `none` for unlimited.
+> - `max_convergence_rounds` (3) — times the convergence loop can append fresh tasks.
+> - `max_handoffs` (10) — hard cap on session spawns.
+> - `no_progress_abort_after` (2) — stop if N handoffs produce zero new `done` tasks.
+
+Write all answers into plan frontmatter:
+
+```yaml
+---
+plan_version: 1
+final_goal:
+  template: all_tests_pass
+  verify_command: "pytest -q"
+status: in_progress
+execution_mode: autonomous
+current_task: 1
+convergence_round: 0
+last_handoff: {pct: 0, ts: null}
+checkpoint_pointer: docs/superpowers/checkpoints/<basename>-checkpoint.json
+autonomous_limits:
+  budget_pct: 30
+  max_convergence_rounds: 3
+  max_handoffs: 10
+  no_progress_abort_after: 2
+---
 ```
 
-If the user picks Interactive, `autonomous_limits` is omitted entirely and
-the controller behaves as currently documented (emit Resume Prompt, stop).
-
-If the user picks Autonomous, the controller's handoff behavior changes —
-see `long-context-checkpoint` skill → "Autonomous Loop Mode" for the
-protocol.
+If the user chose Interactive, omit `autonomous_limits`.
 
 ## Checkpoint State Goes on Disk but NOT in Git
 
