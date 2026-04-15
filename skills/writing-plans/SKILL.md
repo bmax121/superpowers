@@ -47,6 +47,26 @@ This structure informs the task decomposition. Each task should produce self-con
 **Every plan MUST start with this header:**
 
 ```markdown
+---
+plan_version: 1
+final_goal:
+  template: <one of: all_tests_pass, code_review_clean, verify_command_zero, deploy_success, canary_clean, metrics_met, custom>
+  # Template-specific params go below as needed, e.g.:
+  # verify_command: "pytest -q"
+  # judge_rationale: "all lints green, tests green, no broken imports"
+status: not_started
+execution_mode: <interactive | autonomous>
+current_task: 1
+convergence_round: 0
+last_handoff: {pct: 0, ts: null}
+checkpoint_pointer: docs/superpowers/checkpoints/<basename>-checkpoint.json
+autonomous_limits:       # omit entirely if execution_mode: interactive
+  budget_pct: 30
+  max_convergence_rounds: 3
+  max_handoffs: 10
+  no_progress_abort_after: 2
+---
+
 # [Feature Name] Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -59,6 +79,35 @@ This structure informs the task decomposition. Each task should produce self-con
 
 ---
 ```
+
+The plan-writing agent MUST:
+- Fill in the `final_goal` block with a template choice and its required
+  params (ask the user if unclear; `custom` requires a `judge_rationale`).
+- Set `status: not_started` and `current_task: 1` at creation.
+- Emit `autonomous_limits` only when the user has asked for autonomous
+  execution; otherwise leave it out entirely — downstream tooling treats
+  absence as "interactive-only plan".
+
+## Task Status Marker
+
+Every `## Task N` section in the plan MUST include a `**Status:**` line
+just below the task title, with initial value `pending`. The controller
+edits this in place as execution progresses. Example:
+
+```markdown
+### Task 1: LRUCache class
+
+**Tier:** mechanical
+**Status:** pending
+
+<spec body>
+```
+
+Valid values: `pending | in_progress | done | blocked | deferred | superseded`.
+After a task enters `done`, the controller appends `**Commit:** <sha>`
+and `**Provider:** <provider>/<model>` lines. After `blocked`, it appends
+`**Blocker:** <short reason>`. DO NOT write those lines at plan creation
+time — leave them for the controller.
 
 ## Task Structure
 
