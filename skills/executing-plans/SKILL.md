@@ -16,10 +16,19 @@ Load plan, review critically, execute all tasks, report when complete.
 ## The Process
 
 ### Step 1: Load and Review Plan
-1. Read plan file
-2. Review critically - identify any questions or concerns about the plan
-3. If concerns: Raise them with your human partner before starting
-4. If no concerns: Create TodoWrite and proceed
+1. Read the plan file.
+2. If the plan has YAML frontmatter with `plan_version`:
+   - Parse it. The `current_task`, `convergence_round`, and per-task
+     `**Status:**` markers tell you what has already run.
+   - Skip any tasks whose Status is `done`, `deferred`, or `superseded`.
+   - Resume from the first task whose Status is `pending` or `in_progress`.
+   - If `checkpoint_pointer` is set and the file exists, load it for the
+     bulk state (decisions_log, provider_availability); do NOT re-run
+     provider detection.
+3. Review the remaining plan critically - identify any questions or
+   concerns about the plan.
+4. If concerns: Raise them with your human partner before starting.
+5. If no concerns: Create TodoWrite and proceed.
 
 ### Step 2: Execute Tasks
 
