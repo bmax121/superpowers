@@ -1,3 +1,5 @@
+<!-- DEPRECATED in 6.2.0: replaced by unified-reviewer-prompt.md (single-dispatch reviewer covering all 6 dimensions). Kept for reference; will be removed in 7.0.0. -->
+
 # External Reviewer Prompt Template
 
 Use this template when dispatching external reviewers for cross-model review in Stage 3.

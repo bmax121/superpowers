@@ -65,7 +65,7 @@ tiers:
     - provider: anthropic
       model: opus
 
-  # Architecture: design decisions, broad codebase understanding, reviews.
+  # Architecture: design decisions, broad codebase understanding.
   # Always use the most capable available model; cross-family capable models
   # (GPT-5 / Gemini 2.5 Pro) are acceptable if Anthropic is unavailable.
   architecture:
@@ -77,6 +77,23 @@ tiers:
       model: gemini-2.5-pro
     - provider: anthropic
       model: sonnet
+
+  # Reviewer (since 6.2.0): single unified reviewer per task covering 6
+  # dimensions. Sonnet is plenty capable; we don't need Opus for review of
+  # mechanical code. Cross-family fallbacks (codex/gemini) preserve the
+  # cross-model diversity the old Reviewer A+B chain provided. The
+  # controller MAY override this chain at dispatch time to PREFER a family
+  # different from the implementer's actual provider, for blind-spot
+  # diversity (e.g. implementer ran on codex → reviewer routes to anthropic).
+  reviewer:
+    - provider: anthropic
+      model: sonnet
+    - provider: codex
+      model: gpt-5.4
+    - provider: gemini-cli
+      model: gemini-2.5-pro
+    - provider: anthropic
+      model: opus
 
 providers:
   # Built-in: invoked via Claude Code's Agent tool.

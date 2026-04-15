@@ -1,5 +1,59 @@
 # Changelog
 
+## [6.2.0] - 2026-04-15
+
+Single unified reviewer replaces three-stage review chain. Per-task
+subagent dispatches: **5 → 2** (60% reduction).
+
+### Breaking changes
+
+- **Three-stage review removed from the active flow.** `spec-reviewer`,
+  `code-quality-reviewer`, and `external-reviewer` (Reviewer A + B)
+  are no longer dispatched by 6.2.0+ controllers. They're replaced by
+  a single `unified-reviewer-prompt.md` dispatch that covers six
+  dimensions: spec compliance, code quality, test coverage depth,
+  architecture, performance, security.
+- **`Reviewer B Detection` removed.** No more 4-level fallback chain
+  scanning for `/codex:review` skill / codex CLI / gemini CLI / Opus
+  agent. Reviewer routing now goes through the standard
+  `config/models.yaml` provider tier (`reviewer:` tier).
+- **Stage Progress Display markers changed.** Old: `─── Stage 1/3:
+  Spec Compliance ───` (× 3). New: `─── Implementer (provider/model)
+  ───` and `─── Unified Reviewer (provider/model) ───`.
+
+### New features
+
+- **`unified-reviewer-prompt.md`** — single-dispatch reviewer with a
+  rigid 6-dimension output schema (`Spec`, `Quality`, `Coverage`,
+  `Architecture`, `Performance`, `Security`) plus
+  `Findings: Critical / Important / Minor`. Cross-model diversity is
+  preserved via reviewer-tier provider routing — when implementer ran
+  on family X, reviewer prefers family ≠ X.
+- **New `reviewer` tier in `config/models.yaml`** with default
+  fallback chain: anthropic/sonnet → codex/gpt-5.4 →
+  gemini-cli/gemini-2.5-pro → anthropic/opus.
+
+### Migration
+
+- 6.1.0 plans run unchanged on 6.2.0 controllers. Plan format is
+  unchanged.
+- Legacy prompts (`spec-reviewer-prompt.md`,
+  `code-quality-reviewer-prompt.md`, `external-reviewer-prompt.md`)
+  are prefixed with a `DEPRECATED in 6.2.0` banner and remain in
+  the directory. They will be removed in 7.0.0.
+- 6.1.0 controllers still work — they just dispatch the old chain
+  if explicitly told to. Upgrade path: nothing required, the new
+  controller picks up `unified-reviewer-prompt.md` automatically.
+
+### Cost impact
+
+- Per-task subagent dispatches: **5 → 2** (60% reduction)
+- Sonnet review × 3 (one in each stage) → Sonnet review × 1
+- Reviewer A + Reviewer B parallel external review eliminated
+- Wall-clock per task: ~50% faster (fewer round-trips)
+- Quality signal preserved: dimensions are now structured and
+  comparable, with severity-tagged findings driving auto-triage.
+
 ## [6.1.0] - 2026-04-15
 
 Convergence loop + weekly-percent budget + plan-as-state. Minor breaking

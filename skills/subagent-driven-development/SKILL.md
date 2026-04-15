@@ -9,7 +9,9 @@ Execute plan by dispatching fresh subagent per task, with three-stage review aft
 
 **Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.
 
-**Core principle:** Fresh subagent per task + three-stage review (spec → quality → external cross-model) = high quality, fast iteration
+**Core principle:** Fresh subagent per task + single unified review (spec / quality / coverage / architecture / performance / security in one structured output) = high quality at minimum dispatch cost.
+
+**Per-task dispatches** (since 6.2.0): 1 implementer + 1 unified reviewer = 2. Was 5 in 6.1.0 and earlier (impl + spec-reviewer + quality-reviewer + external A + external B).
 
 ## When to Use
 
@@ -44,26 +46,16 @@ digraph process {
     rankdir=TB;
 
     subgraph cluster_per_task {
-        label="Per Task";
+        label="Per Task (2 dispatches: implementer + unified reviewer)";
         "Route task to provider (tier → models.yaml)" [shape=box];
         "Dispatch implementer via chosen provider" [shape=box];
         "Implementer asks questions?" [shape=diamond];
         "Answer questions, provide context" [shape=box];
         "Implementer implements, tests, commits, self-reviews" [shape=box];
-        "Dispatch spec reviewer" [shape=box];
-        "Spec reviewer confirms code matches spec?" [shape=diamond];
-        "Implementer fixes spec gaps" [shape=box];
-        "Dispatch code quality reviewer" [shape=box];
-        "Code quality reviewer approves?" [shape=diamond];
-        "Implementer fixes quality issues" [shape=box];
-
-        subgraph cluster_external {
-            label="Stage 3: External Review Loop";
-            "Dispatch Reviewer A + Reviewer B in parallel" [shape=box];
-            "Auto-triage per rules, append decisions_log" [shape=box];
-            "Any issues judged Valid?" [shape=diamond];
-            "Dispatch implementer to fix valid issues" [shape=box];
-        }
+        "Dispatch unified reviewer (./unified-reviewer-prompt.md)" [shape=box style=filled fillcolor=lightblue];
+        "Auto-triage findings per rules, append decisions_log" [shape=box];
+        "Any Critical or Valid Important findings?" [shape=diamond];
+        "Dispatch implementer to fix valid findings" [shape=box];
 
         "Mark task complete in TodoWrite + write checkpoint" [shape=box style=filled fillcolor=lightyellow];
         "Score next-task relatedness, pick threshold (30/50/70)" [shape=box];
@@ -71,47 +63,45 @@ digraph process {
         "Emit Resume Prompt, stop session" [shape=box style=filled fillcolor=lightcoral];
     }
 
-    "Provider detection + Reviewer B detection (plan start)" [shape=box];
+    "Provider detection (plan start)" [shape=box];
     "Read plan, extract tasks, seed checkpoint" [shape=box];
     "Existing unfinished checkpoint?" [shape=diamond];
     "Resume from checkpoint (long-context-checkpoint skill)" [shape=box];
     "More tasks remain?" [shape=diamond];
-    "Dispatch final code reviewer for entire implementation" [shape=box];
+    "Convergence loop: verify final_goal" [shape=box];
     "Use superpowers:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
     "Read plan, extract tasks, seed checkpoint" -> "Existing unfinished checkpoint?";
     "Existing unfinished checkpoint?" -> "Resume from checkpoint (long-context-checkpoint skill)" [label="yes"];
-    "Existing unfinished checkpoint?" -> "Provider detection + Reviewer B detection (plan start)" [label="no"];
+    "Existing unfinished checkpoint?" -> "Provider detection (plan start)" [label="no"];
     "Resume from checkpoint (long-context-checkpoint skill)" -> "Route task to provider (tier → models.yaml)";
-    "Provider detection + Reviewer B detection (plan start)" -> "Route task to provider (tier → models.yaml)";
+    "Provider detection (plan start)" -> "Route task to provider (tier → models.yaml)";
     "Route task to provider (tier → models.yaml)" -> "Dispatch implementer via chosen provider";
     "Dispatch implementer via chosen provider" -> "Implementer asks questions?";
     "Implementer asks questions?" -> "Answer questions, provide context" [label="yes"];
     "Answer questions, provide context" -> "Dispatch implementer via chosen provider";
     "Implementer asks questions?" -> "Implementer implements, tests, commits, self-reviews" [label="no"];
-    "Implementer implements, tests, commits, self-reviews" -> "Dispatch spec reviewer";
-    "Dispatch spec reviewer" -> "Spec reviewer confirms code matches spec?";
-    "Spec reviewer confirms code matches spec?" -> "Implementer fixes spec gaps" [label="no"];
-    "Implementer fixes spec gaps" -> "Dispatch spec reviewer" [label="re-review"];
-    "Spec reviewer confirms code matches spec?" -> "Dispatch code quality reviewer" [label="yes"];
-    "Dispatch code quality reviewer" -> "Code quality reviewer approves?";
-    "Code quality reviewer approves?" -> "Implementer fixes quality issues" [label="no"];
-    "Implementer fixes quality issues" -> "Dispatch code quality reviewer" [label="re-review"];
-    "Code quality reviewer approves?" -> "Dispatch Reviewer A + Reviewer B in parallel" [label="yes"];
-    "Dispatch Reviewer A + Reviewer B in parallel" -> "Auto-triage per rules, append decisions_log";
-    "Auto-triage per rules, append decisions_log" -> "Any issues judged Valid?";
-    "Any issues judged Valid?" -> "Dispatch implementer to fix valid issues" [label="yes"];
-    "Any issues judged Valid?" -> "Mark task complete in TodoWrite + write checkpoint" [label="no"];
-    "Dispatch implementer to fix valid issues" -> "Dispatch spec reviewer" [label="re-run internal reviews"];
+    "Implementer implements, tests, commits, self-reviews" -> "Dispatch unified reviewer (./unified-reviewer-prompt.md)";
+    "Dispatch unified reviewer (./unified-reviewer-prompt.md)" -> "Auto-triage findings per rules, append decisions_log";
+    "Auto-triage findings per rules, append decisions_log" -> "Any Critical or Valid Important findings?";
+    "Any Critical or Valid Important findings?" -> "Dispatch implementer to fix valid findings" [label="yes"];
+    "Any Critical or Valid Important findings?" -> "Mark task complete in TodoWrite + write checkpoint" [label="no"];
+    "Dispatch implementer to fix valid findings" -> "Dispatch unified reviewer (./unified-reviewer-prompt.md)" [label="re-review"];
     "Mark task complete in TodoWrite + write checkpoint" -> "Score next-task relatedness, pick threshold (30/50/70)";
     "Score next-task relatedness, pick threshold (30/50/70)" -> "Recompute context estimate. pct >= threshold?";
     "Recompute context estimate. pct >= threshold?" -> "Emit Resume Prompt, stop session" [label="yes"];
     "Recompute context estimate. pct >= threshold?" -> "More tasks remain?" [label="no"];
     "More tasks remain?" -> "Route task to provider (tier → models.yaml)" [label="yes"];
-    "More tasks remain?" -> "Dispatch final code reviewer for entire implementation" [label="no"];
-    "Dispatch final code reviewer for entire implementation" -> "Use superpowers:finishing-a-development-branch";
+    "More tasks remain?" -> "Convergence loop: verify final_goal" [label="no"];
+    "Convergence loop: verify final_goal" -> "Use superpowers:finishing-a-development-branch";
 }
 ```
+
+**As of 6.2.0:** review is one dispatch (`./unified-reviewer-prompt.md`)
+covering spec / quality / coverage / architecture / performance /
+security in a single structured output. The earlier three-stage chain
+(spec → quality → external A+B) is replaced. Per-task subagent
+dispatches: 1 implementer + 1 reviewer = **2 per task** (was 5).
 
 ## Plan Start Initialization (one-time ask, first run only)
 
@@ -384,7 +374,8 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 
 ## Stage Progress Display
 
-**You MUST output stage markers before each review stage.** This gives the user real-time visibility into where the process is.
+**You MUST output a marker before dispatching each subagent.** This gives
+the user real-time visibility.
 
 **Format — output these exact markers (with task number and name filled in):**
 
@@ -393,90 +384,49 @@ Implementer subagents report one of four statuses. Handle each appropriately:
  Task {N}/{TOTAL}: {task name}
 ══════════════════════════════════════════════════════════
 
-─── Stage 1/3: Spec Compliance ───
-  Dispatching spec reviewer...
-  Result: ✅ Spec compliant
+─── Implementer ({provider}/{model}) ───
+  Dispatching...
+  Result: ✅ DONE
 
-─── Stage 2/3: Code Quality ───
-  Dispatching code quality reviewer...
-  Result: ✅ Approved
-
-─── Stage 3/3: External Review ───
-  ├─ Reviewer A (Sonnet):    dispatching...
-  ├─ Reviewer B ({detected}): dispatching...
-  ├─ Reviewer A (Sonnet):    ✅ Approved
-  └─ Reviewer B ({detected}): ✅ Approved
+─── Unified Reviewer ({provider}/{model}) ───
+  Dispatching...
+  Result: ✅ APPROVED
+  Findings: 0 critical, 0 important, 0 minor
 
 ✅ Task {N}/{TOTAL} complete
 ```
 
-**On failure, show the loop:**
+**On findings → fix → re-review:**
 ```
-─── Stage 1/3: Spec Compliance ───
-  Dispatching spec reviewer...
-  Result: ❌ Issues found (2 items)
+─── Unified Reviewer (anthropic/sonnet) ───
+  Dispatching...
+  Result: ⚠ NEEDS_FIX
+  Findings: 0 critical, 2 important, 1 minor
+  Auto-triage: 2 valid (important), 1 rejected (minor: matches convention)
   Dispatching implementer to fix...
-  Re-dispatching spec reviewer...
-  Result: ✅ Spec compliant
+  Re-dispatching unified reviewer...
+  Result: ✅ APPROVED
 ```
 
 **Rules:**
-- Output the stage marker BEFORE dispatching each subagent
-- Update the result line AFTER the subagent returns
-- Show loop iterations inline (don't restart the stage marker)
-- Use `├─` for in-progress items, `└─` for the last item in a group
-
-## Reviewer B Detection
-
-At plan start (before Task 1 begins), detect the best available Reviewer B and cache the result for all tasks in this plan.
-
-**Detection runs once at plan start. Output the detection results:**
-
-```
-─── Reviewer B detection ───
-  /codex:review skill: checking...
-```
-
-**Four-level fallback chain:**
-
-1. **`/codex:review` skill** (codex plugin installed): Invoke via Skill tool with `--wait --base {BASE_SHA}`. Async alternative: invoke without `--wait`, poll `/codex:status`, retrieve via `/codex:result`. True cross-family diversity (GPT model).
-2. **Codex CLI** (codex installed, plugin not): `codex exec review --base {BASE_SHA} --commit {HEAD_SHA} --ephemeral -o "$(mktemp /tmp/reviewer-b-XXXXXX.txt)"`. Same GPT model via standalone CLI.
-3. **Gemini CLI** (gemini installed, codex not): Write prompt to temp file, pipe via stdin: `gemini -m gemini-2.5-pro < "$PROMPT_FILE"`. Cross-family diversity via Gemini.
-4. **Claude Opus Agent** (no external CLI): Agent tool with `model: "opus"` using `./external-reviewer-prompt.md`. Same-family fallback — still provides diversity via different capability tier.
-
-**Detection output examples:**
-
-When codex plugin found:
-```
-─── Reviewer B detection ───
-  /codex:review skill: ✅ available (codex plugin)
-  Using: /codex:review (GPT, cross-family)
-```
-
-When only codex CLI found:
-```
-─── Reviewer B detection ───
-  /codex:review skill: not available
-  codex CLI: ✅ found (v0.116.0)
-  Using: codex exec review (GPT, cross-family)
-```
-
-When nothing external found:
-```
-─── Reviewer B detection ───
-  /codex:review skill: not available
-  codex CLI: not found
-  gemini CLI: not found
-  ⚠ No external reviewer available — falling back to Claude Opus
-  Using: Agent tool model: "opus" (same-family fallback)
-```
+- Output the marker BEFORE dispatching each subagent.
+- Update the result line AFTER the subagent returns.
+- Show loop iterations inline (don't restart the task marker).
 
 ## Prompt Templates
 
 - `./implementer-prompt.md` - Dispatch implementer subagent
-- `./spec-reviewer-prompt.md` - Dispatch spec compliance reviewer subagent
-- `./code-quality-reviewer-prompt.md` - Dispatch code quality reviewer subagent (expanded: +performance, +consistency, +design)
-- `./external-reviewer-prompt.md` - Dispatch external reviewers (Reviewer A + Reviewer B, cross-model review)
+- **`./unified-reviewer-prompt.md`** - Single-dispatch reviewer covering
+  spec / quality / coverage / architecture / performance / security
+  (used since 6.2.0)
+- `./goal-judge-prompt.md` - Goal Judge subagent (custom final_goal template only)
+- `./gap-analyzer-prompt.md` - Gap Analyzer subagent (convergence loop)
+
+**Deprecated since 6.2.0** (kept for reference, not invoked by 6.2.0+ controllers):
+
+- `./spec-reviewer-prompt.md` — superseded by unified reviewer Dimension A
+- `./code-quality-reviewer-prompt.md` — superseded by Dimensions B/C/D/E
+- `./external-reviewer-prompt.md` — superseded by Dimension F + provider routing
 
 ## Example Workflow
 
@@ -487,38 +437,28 @@ You: I'm using Subagent-Driven Development to execute this plan.
 [Extract all 5 tasks with full text and context]
 [Create TodoWrite with all tasks]
 
-─── Reviewer B detection ───
-  /codex:review skill: ✅ available (codex plugin)
-  Using: /codex:review (GPT, cross-family)
+─── Provider detection ───
+  anthropic (agent_tool): ✅
+  codex (cli_wrapper): ✅
+  gemini-cli (cli_wrapper): ✅
+  glm-cli (cli_wrapper): ❌ not on PATH
 
 ══════════════════════════════════════════════════════════
  Task 1/5: Hook installation script
 ══════════════════════════════════════════════════════════
 
-[Dispatch implementation subagent with full task text + context]
+─── Implementer (anthropic/sonnet) ───
+  Dispatching...
+  Implementer: "Before I begin — user or system level?"
+  You: "User level"
+  Result: ✅ DONE
+    - install-hook implemented, 5/5 tests passing
+    - Self-review found missing --force flag, added
 
-Implementer: "Before I begin - should the hook be installed at user or system level?"
-You: "User level (~/.config/superpowers/hooks/)"
-
-Implementer:
-  - Implemented install-hook command
-  - Added tests, 5/5 passing
-  - Self-review: Found I missed --force flag, added it
-  - Committed
-
-─── Stage 1/3: Spec Compliance ───
-  Dispatching spec reviewer...
-  Result: ✅ Spec compliant — all requirements met, nothing extra
-
-─── Stage 2/3: Code Quality ───
-  Dispatching code quality reviewer...
-  Result: ✅ Approved — good test coverage, clean
-
-─── Stage 3/3: External Review ───
-  ├─ Reviewer A (Sonnet):  dispatching via Agent tool...
-  ├─ Reviewer B (Codex/GPT): dispatching via /codex:review --wait...
-  ├─ Reviewer A (Sonnet):  ✅ Approved — no additional issues found
-  └─ Reviewer B (Codex/GPT): ✅ Approved — no issues found
+─── Unified Reviewer (codex/gpt-5.4) ───
+  (cross-family routing: implementer was Anthropic → reviewer is Codex)
+  Dispatching...
+  Result: ✅ APPROVED (0 critical, 0 important, 0 minor)
 
 ✅ Task 1 complete
 
@@ -526,71 +466,57 @@ Implementer:
  Task 2/5: Recovery modes
 ══════════════════════════════════════════════════════════
 
-[Dispatch implementation subagent with full task text + context]
+─── Implementer (anthropic/sonnet) ───
+  Result: ✅ DONE — verify/repair modes, 8/8 tests passing
 
-Implementer:
-  - Added verify/repair modes
-  - 8/8 tests passing
-  - Self-review: All good
-  - Committed
+─── Unified Reviewer (codex/gpt-5.4) ───
+  Result: ⚠ NEEDS_FIX
+    Critical: (none)
+    Important: 1
+      - Spec gap: missing progress reporting (spec: "report every 100 items")
+      - Quality: magic number 100 should be named constant
+    Minor: 1
+      - Style: consider extracting progress utility (Coverage dim)
+  Auto-triage:
+    - 2 Important → Valid (spec gap + named-constant rule)
+    - 1 Minor → Rejected (YAGNI: utility used once)
+  Decisions: 2 valid, 1 rejected, 0 deferred. Logged.
 
-─── Stage 1/3: Spec Compliance ───
-  Dispatching spec reviewer...
-  Result: ❌ Issues found (2 items)
-    - Missing: Progress reporting (spec says "report every 100 items")
-    - Extra: Added --json flag (not requested)
-  Dispatching implementer to fix...
-  Re-dispatching spec reviewer...
-  Result: ✅ Spec compliant
+─── Implementer (anthropic/sonnet) — fix pass ───
+  Result: ✅ DONE — added progress callback, extracted REPORT_INTERVAL
 
-─── Stage 2/3: Code Quality ───
-  Dispatching code quality reviewer...
-  Result: ❌ Issues found (1 item)
-    - Important: Magic number (100) should be a named constant
-  Dispatching implementer to fix...
-  Re-dispatching code quality reviewer...
-  Result: ✅ Approved
-
-─── Stage 3/3: External Review ───
-  ├─ Reviewer A (Sonnet):  dispatching via Agent tool...
-  ├─ Reviewer B (Codex/GPT): dispatching via /codex:review --wait...
-  ├─ Reviewer A (Sonnet):  ⚠ 1 Minor issue
-  │    Minor: Consider extracting progress utility
-  └─ Reviewer B (Codex/GPT): ✅ Approved — no issues found
-
-─── Auto-triaging external review feedback ───
-  Reviewer A (Sonnet): 1 issue
-    1. [Minor] Extract progress utility → ❌ Rejected (YAGNI — used once in this module)
-  Decisions: 0 valid, 1 rejected, 0 deferred. Logged to checkpoint.decisions_log.
+─── Unified Reviewer (codex/gpt-5.4) ───
+  Result: ✅ APPROVED
 
 ✅ Task 2 complete (checkpoint written; context estimate 18%)
 
 ...
 
-[After all tasks]
-[Dispatch final code-reviewer]
-Final reviewer: All requirements met, ready to merge
+[After all tasks → convergence loop runs final_goal verification]
+[If all met, frontmatter.status = goal_met; terminate.]
 
 Done!
 ```
 
-## External Review Loop
+## Unified Review Stage
 
-After internal reviews (spec compliance + code quality) pass, the controller dispatches two external reviewers **in parallel**:
+After the implementer reports `Status: DONE`, the controller dispatches
+**one** subagent (`./unified-reviewer-prompt.md`) that covers all six
+review dimensions in a single structured output: spec compliance, code
+quality, test coverage depth, architecture, performance, security.
 
-**Reviewer A (always Claude Sonnet):** Dispatched via Agent tool with `model: "sonnet"`. Uses `./external-reviewer-prompt.md` template. Focuses on blind spots, cross-task consistency, systemic/evolutionary concerns, and security.
-
-**Reviewer B (best available — see "Reviewer B Detection"):** Dispatched via the detected mechanism (codex skill, codex CLI, gemini CLI, or opus agent). The detection result is cached from plan start.
-
-**Parallel execution:** Reviewer A (Agent tool) and Reviewer B (Skill/Bash/Agent tool) dispatch in the same message for concurrent execution.
+**Cross-model diversity** is preserved by routing the reviewer to a
+**different family than the implementer when possible** (see "Model
+Selection" below — `reviewer` tier prefers a non-Anthropic provider when
+the implementer ran on Anthropic, and vice versa).
 
 ### Autonomous Feedback Triage
 
-External reviewer feedback is **not automatically trusted**, but it is also
-**not user-gated**. The controller triages every issue by the rules below,
-logs every decision to `checkpoint.decisions_log` (append-only), and moves
-on. The user audits the log after the fact; they are not interrupted in the
-middle.
+Reviewer findings are **not automatically trusted**, but they are also
+**not user-gated**. The controller triages every finding by the rules
+below, logs every decision to `checkpoint.decisions_log` (append-only),
+and moves on. The user audits the log after the fact; they are not
+interrupted in the middle.
 
 This is a deliberate design choice for long-running plans: real-time
 confirmation turns every task into a 5-minute dialogue. The decision
@@ -601,11 +527,12 @@ better paper trail.
 
 | Reviewer finding | Auto-decision |
 |---|---|
-| `Critical` or `Important` + touches security / correctness / data loss | **Valid** → dispatch implementer to fix |
-| `Critical` or `Important` + controller cannot determine validity (reviewer citing code it can't reconcile with) | **Deferred** → add to `open_questions`, task completes with ⚠ note |
-| `Minor` / `Style` + conflicts with a visible project convention | **Rejected** → log conflict + rationale |
-| `Minor` / `Style` + no conflict, small fix | **Valid** → dispatch fix |
-| `Minor` / `Style` + no conflict, would require ≥ 30 lines to "fix" | **Rejected** (YAGNI) |
+| `Critical` (any) | **Valid** → dispatch implementer to fix |
+| `Important` + touches security / correctness / data loss | **Valid** → fix |
+| `Important` + controller cannot determine validity (reviewer citing code it can't reconcile with) | **Deferred** → add to `open_questions`, task completes with ⚠ note |
+| `Minor` + conflicts with a visible project convention | **Rejected** → log conflict + rationale |
+| `Minor` + no conflict, small fix (< 30 lines) | **Valid** → dispatch fix |
+| `Minor` + no conflict, > 30 lines to "fix" | **Rejected** (YAGNI) |
 | Reviewer cites wrong assumption / misread API / wrong file | **Rejected** → log the misread |
 | Pure design trade-off with no clearly-better answer | **Deferred** → `open_questions`, continue |
 
@@ -615,21 +542,28 @@ better paper trail.
 {
   "ts":        "2026-04-13T14:22:10Z",
   "task":      2,
-  "stage":     "external_review_triage",
-  "reviewer":  "sonnet",
-  "issue":     "Minor: extract progress utility",
-  "decision":  "rejected",
-  "rationale": "YAGNI — progress printer is used once; extraction would add an indirection with no callers"
+  "stage":     "review_triage",
+  "reviewer":  "anthropic/sonnet",
+  "dimension": "Quality",
+  "severity":  "Important",
+  "issue":     "magic number 100 should be a named constant (utils.ts:45)",
+  "decision":  "valid",
+  "rationale": "matches naming convention rule, < 5 lines"
 }
 ```
 
 **After triage:**
-1. Controller prints one-line summary: `Decisions: N valid, M rejected, K deferred. Full log: <checkpoint>.decisions_log`
-2. Controller writes checkpoint (decisions_log appended, open_questions updated).
-3. If any `valid` → dispatch implementer subagent to fix those only, re-run internal reviews (Stage 1+2), then re-run Stage 3.
-4. If zero `valid` → mark task complete, recompute context estimate, proceed.
+1. Controller prints one-line summary:
+   `Decisions: N valid, M rejected, K deferred. Full log: <checkpoint>.decisions_log`
+2. Controller writes checkpoint (decisions_log appended,
+   open_questions updated).
+3. If any `valid` → dispatch implementer subagent to fix those only;
+   re-run unified reviewer.
+4. If zero `valid` → mark task complete; recompute context estimate;
+   proceed.
 
-**Exit condition:** No issues remain in `valid` state (either all fixed and re-approved, or all rejected/deferred).
+**Exit condition:** Reviewer returns `Status: APPROVED` OR all remaining
+findings are rejected/deferred (with audit trail).
 
 ## Convergence Loop
 
@@ -726,47 +660,16 @@ Autonomous mode: all `exit 2` cases write `NEEDS_HUMAN.txt` and the outer
 `run-plan-autonomous.sh` stops the loop. The user inspects the file and
 decides whether to resume.
 
-### External Review Example
-
-```
-─── Stage 3/3: External Review ───
-  ├─ Reviewer A (Sonnet):  dispatching via Agent tool...
-  ├─ Reviewer B (Codex/GPT): dispatching via /codex:review --wait --base abc123...
-  ├─ Reviewer A (Sonnet):  ❌ Needs Fix (1 Important)
-  │    Important: Race condition in concurrent access to shared cache (utils.ts:45)
-  └─ Reviewer B (Codex/GPT): ✅ Approved
-
-─── Auto-triaging external review feedback ───
-  Reviewer A (Sonnet): 1 issue
-    1. [Important] Race condition in cache access → ✅ Valid (correctness issue; dispatching fix)
-  Reviewer B (Codex/GPT): 0 issues
-  Decisions: 1 valid, 0 rejected, 0 deferred. Logged to checkpoint.decisions_log.
-
-  Dispatching implementer to fix...
-
-  Re-running internal reviews on fix:
-─── Stage 1/3: Spec Compliance (re-review) ───
-  Result: ✅ Spec compliant
-─── Stage 2/3: Code Quality (re-review) ───
-  Result: ✅ Approved
-
-─── Stage 3/3: External Review (round 2) ───
-  ├─ Reviewer A (Sonnet):  ✅ Approved — race condition properly addressed
-  └─ Reviewer B (Codex/GPT): ✅ Approved
-
-✅ Task 2 complete
-```
-
 ## Advantages
 
 **vs. Manual execution:**
 - Subagents follow TDD naturally
 - Fresh context per task (no confusion)
-- Parallel-safe (subagents don't interfere)
+- Parallel-safe (subagents don't interfere across tasks)
 - Subagent can ask questions (before AND during work)
 
 **vs. Executing Plans:**
-- Same session (no handoff)
+- Same session (no handoff between tasks)
 - Continuous progress (no waiting)
 - Review checkpoints automatic
 
@@ -778,44 +681,38 @@ decides whether to resume.
 
 **Quality gates:**
 - Self-review catches issues before handoff
-- Three-stage review: spec compliance, code quality (expanded), external cross-model
-- Review loops ensure fixes actually work at each stage
-- Spec compliance prevents over/under-building
-- Code quality ensures implementation is well-built, performant, consistent, well-designed
-- External cross-model review catches blind spots that same-model review misses
+- **Single unified review** (since 6.2.0) covering 6 dimensions
+  (spec / quality / coverage / architecture / performance / security)
+- Cross-model diversity preserved via reviewer-tier provider routing
+  (reviewer prefers a different family from implementer)
+- Review loop ensures fixes actually work
+- Severity-tagged findings + autonomous triage matrix
 
-**Cost:**
-- More subagent invocations (implementer + 2 internal reviewers + 2 external reviewers per task)
-- External review loop adds Sonnet API cost + Codex/Opus API cost per task
-- Controller does more prep work (extracting all tasks upfront, merging external feedback)
-- Review loops add iterations at each stage
-- But catches issues early (cheaper than debugging later)
-- Cross-model review is the most expensive stage — justified by catching blind spots
+**Cost (since 6.2.0):**
+- 2 subagent invocations per task (implementer + reviewer) — down from 5
+- One review loop iteration on `NEEDS_FIX`
+- ~60% reduction in subagent dispatches vs. the old three-stage chain
+- Controller still does prep work (extracting all tasks upfront, building
+  diff for reviewer)
 
 ## Red Flags
 
 **Never:**
 - Start implementation on main/master branch without explicit user consent
-- Skip reviews (spec compliance OR code quality)
-- Proceed with unfixed issues
+- Skip the unified review (every task gets one reviewer dispatch, no exceptions)
+- Proceed with unfixed Critical or Valid Important findings
 - Dispatch multiple implementation subagents in parallel (conflicts)
 - Make subagent read plan file (provide full text instead)
 - Skip scene-setting context (subagent needs to understand where task fits)
 - Ignore subagent questions (answer before letting them proceed)
-- Accept "close enough" on spec compliance (spec reviewer found issues = not done)
-- Skip review loops (reviewer found issues = implementer fixes = review again)
-- Let implementer self-review replace actual review (both are needed)
-- **Start code quality review before spec compliance is ✅** (wrong order)
-- Move to next task while any review stage has open issues
-- **Skip external review after internal reviews pass** (all three stages are mandatory)
-- **Start external review before code quality review is ✅** (wrong order: spec → quality → external)
-- **Proceed when only one external reviewer approves** (both external reviewers must approve, or user confirms triage rejections)
-- **Send unfixed internal review issues to external review** (fix internal issues first)
-- **Skip Reviewer B detection** (run it once at plan start, cache the result)
-- **Omit stage markers** (user must see which stage is active at all times)
-- **Blindly accept external review feedback** (auto-triage each issue by the rules in Autonomous Feedback Triage — external models may misunderstand project conventions)
-- **Skip logging triage decisions** (every decision must land in `checkpoint.decisions_log` — that log IS the user's audit path, so if you skip logging you have effectively hidden the decision)
-- **Interrupt the user mid-task to confirm a triage** (default is autonomous; only escalate on the four hard gates listed in "When to Escalate to the User")
+- Let implementer self-review replace the reviewer dispatch (both are needed)
+- Move to next task while reviewer Status is `NEEDS_FIX` and any finding remains in Valid state
+- **Re-introduce the old three-stage chain** (spec → quality → external A+B). 6.2.0 collapsed this into one dispatch on purpose; bringing back four reviewers undoes the cost win without adding signal.
+- **Use the same provider family for implementer and reviewer** when a different family is available — diversity preserved by routing the reviewer to the opposite family
+- **Omit dispatch markers** (user must see implementer/reviewer transitions in real time)
+- **Blindly accept reviewer findings** (auto-triage each finding by the rule matrix in "Autonomous Feedback Triage")
+- **Skip logging triage decisions** (every decision must land in `checkpoint.decisions_log` — that log IS the user's audit path; skipping logging hides the decision)
+- **Interrupt the user mid-task to confirm a triage** (default is autonomous; only escalate on the hard gates listed in the termination matrix)
 - **Skip writing the checkpoint after a task completes** (the checkpoint is the only durable state; subagents are fresh per task, so if you don't write, it's gone)
 
 **If subagent asks questions:**
