@@ -1,27 +1,31 @@
 ---
-description: "Resume an in-progress plan from a long-context checkpoint. Usage: /resume-plan <path-to-checkpoint.json>. Omit the path to auto-discover the most recent unfinished checkpoint in docs/superpowers/checkpoints/."
+description: "Resume an in-progress plan from frontmatter (plan.md) or checkpoint. Usage: /resume-plan <path-to-plan.md-or-checkpoint.json>. Omit the path to auto-discover."
 ---
 
-You were asked to resume a superpowers plan from a checkpoint. Do this now, in this order, before any other action:
+You were asked to resume a superpowers plan. Do this, in order, before any other action:
 
-1. Invoke the **`superpowers:long-context-checkpoint`** skill via the Skill tool. Its SKILL.md has the full resume procedure.
+1. Invoke the **`superpowers:long-context-checkpoint`** skill via the Skill tool for the full resume procedure.
 
 2. Parse the argument passed after `/resume-plan`:
-   - If a path was given, use it as the checkpoint file.
-   - If no path was given, auto-discover:
-     - `ls docs/superpowers/checkpoints/*-checkpoint.json 2>/dev/null`
-     - If exactly one file exists and it has at least one task with `status != "done"`, use it.
-     - If multiple candidates, list them and ask the user which to resume — this is one of the four hard gates where asking is required (you cannot pick the wrong plan silently).
-     - If none exist, tell the user "no unfinished checkpoints found" and stop.
+   - If a path to `*.md` was given, treat it as a plan.md (preferred path).
+   - If a path to `*-checkpoint.json` was given, read its `plan_path` field to find the plan.md.
+   - If no path given, auto-discover:
+     1. Scan `docs/superpowers/plans/*.md`. For each, parse frontmatter; pick those whose `status` is in `{not_started, in_progress, goal_not_met, stalled, blocked, budget_exhausted, judge_uncertain, review_contradiction, main_branch_gate}` (i.e. anything not `goal_met`).
+     2. If exactly one candidate: use it.
+     3. If multiple: list them and ask the user which to resume (this is one of the four hard gates where asking is required).
+     4. If none: fall back to scanning `docs/superpowers/checkpoints/*-checkpoint.json` for any checkpoint whose tasks array has entries not `done`. Same disambiguation rules.
+     5. If still none: tell the user "no resumable plan or checkpoint found" and stop.
 
-3. Follow the "Resuming in a New Session" section of the `long-context-checkpoint` skill:
-   - Read the checkpoint JSON.
-   - Verify the worktree path exists; cd into it (or prompt the user to).
-   - Rebuild TodoWrite from the checkpoint's `todos` + remaining `tasks`.
-   - **Do not re-run** provider detection or Reviewer B detection — reuse the cached values.
-   - Print the "Resumed from checkpoint" banner.
-   - Continue `superpowers:subagent-driven-development` from the first task whose `status != "done"`, resuming at the recorded `stage` if any.
+3. Follow the algorithm in `long-context-checkpoint` skill's "Resuming in a New Session" section:
+   - Read the plan's frontmatter.
+   - Load bulk state from `checkpoint_pointer` if available.
+   - Rebuild TodoWrite.
+   - Do NOT re-run provider detection or Plan Start Initialization.
+   - Print a `── Resumed from plan ──` banner with next task number and stage.
+   - Continue `subagent-driven-development` from `frontmatter.current_task`.
 
-4. After banner, hand off to `superpowers:subagent-driven-development` for the remaining tasks.
+4. Hand off to `superpowers:subagent-driven-development` for the remaining tasks.
 
-If the checkpoint file is missing, malformed, schema_version unknown, or the worktree no longer exists, STOP and report the specific failure — do not attempt partial recovery.
+If the frontmatter is missing `plan_version`, the plan is a 6.0.0-or-earlier plan — fall back to the legacy checkpoint-only resume described in `long-context-checkpoint`.
+
+If the plan file is missing, malformed, `plan_version` is unknown, or the worktree no longer exists, STOP and report the specific failure — do not attempt partial recovery.
