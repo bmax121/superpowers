@@ -391,24 +391,75 @@ sessions.
 
 ## Resuming in a New Session
 
-When invoked with a checkpoint path (either via `/resume-plan` or directly),
-the new controller MUST:
+As of 6.1.0, the resume entry point is **plan.md frontmatter first,
+checkpoint.json second**. This lets `executing-plans` (and any other
+skill that starts from a plan) recover state without requiring a
+separate checkpoint file.
 
-1. **Read the checkpoint file.** If missing or schema_version unknown → abort with a clear error.
-2. **Verify the worktree exists** at `worktree`. If not → abort.
-3. **`cd` into the worktree** (or remind the user to).
-4. **Rebuild TodoWrite** from `todos` + any task still in `pending`/`in_progress` from `tasks`.
-5. **Do NOT re-run provider detection** — use `provider_availability` from the checkpoint. (If the user wants fresh detection they can delete that field and the controller will re-probe.)
-6. **Do NOT re-run Reviewer B detection** — use `reviewer_b_detected`.
-7. **Find the first task with `status != "done"`**. If it was `in_progress` at a known `stage`, resume from that stage (e.g. "was in external review, re-dispatch Reviewer A + B"). If stage is `null`, start from Stage 1/3.
-8. **Print a resume banner**:
-   ```
-   ── Resumed from checkpoint ──
-     Plan:         {plan_path}
-     Next task:    {n}/{total} — {name}
-     Resuming at:  Stage {s}/3
-   ```
-9. **Continue subagent-driven-development from there.**
+### Resume algorithm
+
+```
+given INPUT (plan.md path OR checkpoint.json path):
+
+  # Step 1 — resolve plan.md
+  if INPUT ends in .md:
+    plan = INPUT
+  elif INPUT ends in .json:
+    plan = checkpoint.json.plan_path        # back-pointer
+  else:
+    error and exit
+
+  # Step 2 — read frontmatter (authoritative for resume state)
+  if plan.md has `plan_version` in frontmatter:
+    state = parse frontmatter
+    if state.checkpoint_pointer and file exists:
+      # merge bulk state (decisions_log, provider_availability, todos)
+      state += read_checkpoint(state.checkpoint_pointer)
+    else:
+      warn: "no checkpoint; decisions_log will start empty for this run"
+    rebuild TodoWrite from plan.md tasks
+    jump to subagent-driven-development at frontmatter.current_task
+    (resume at the recorded `stage` inside that task, if any)
+
+  # Step 3 — legacy fallback (6.0.0 checkpoints without plan frontmatter)
+  elif checkpoint.json exists:
+    state = read checkpoint
+    rebuild TodoWrite from state.tasks
+    jump to subagent-driven-development at state.next_pending_task
+
+  # Step 4 — neither present
+  else:
+    print resume banner "no resumable state"; invoke Plan Start Init.
+```
+
+### `checkpoint_pointer` — the back-link
+
+Every checkpoint.json that corresponds to a plan carries
+`plan_path: "docs/superpowers/plans/<name>.md"`, and the plan's
+frontmatter carries `checkpoint_pointer` with the reverse. Both sides
+keep the link current so the resume algorithm can cross-reference from
+either direction.
+
+### What resume does NOT re-do
+
+- **Does not re-run** `scripts/detect-model-providers.sh` (cached in
+  checkpoint's `provider_availability`). If the user wants fresh probing
+  they delete that field.
+- **Does not re-run** Reviewer B detection.
+- **Does not re-ask** Plan Start Initialization — the frontmatter
+  already encodes the user's choices.
+
+### Resume banner
+
+Print at the top of the new session before dispatching the first task:
+
+```
+── Resumed from plan ──
+  Plan:         {plan_path}
+  Next task:    {n}/{total} — {name}
+  Resuming at:  Stage {s}/3  (or "start" if no in-flight stage)
+  Convergence:  round {r} of {max_convergence_rounds}
+```
 
 ## Hard Gates (Never Autonomous)
 
