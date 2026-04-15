@@ -227,6 +227,39 @@ This skill is paired with [`superpowers:long-context-checkpoint`](../long-contex
 
 Never treat the checkpoint as optional. If the write fails (disk full, permissions), stop and surface the error — do not continue without durable state.
 
+### Dual-write protocol (plan.md + checkpoint.json)
+
+Execution state lives in two files; every state transition touches BOTH.
+
+**On each task's final approval** (all 3 review stages ✅):
+
+1. **Write checkpoint.json** (authoritative, structured). Update
+   `tasks[n]` with `status: done`, `commit`, `provider_used`,
+   `triage_decisions`; append to `decisions_log`; update `todos`.
+2. **Edit plan.md** (human-readable view):
+   - Under `## Task N`, change `**Status:** in_progress` →
+     `**Status:** done` (or add the line if missing).
+   - Append `**Commit:** <sha>` and `**Provider:** <provider>/<model>`
+     underneath the Status line if not already present.
+   - In frontmatter, set `current_task: N+1` and
+     `last_handoff: {pct: <estimate>, ts: <ISO>}`.
+
+**On BLOCKED** (all providers in tier chain exhausted):
+
+1. checkpoint.json records the blocker detail.
+2. plan.md `## Task N`: `**Status:** blocked` + `**Blocker:** <short reason>`.
+3. Autonomous mode additionally writes `NEEDS_HUMAN.txt` and exits.
+
+**Atomicity:** checkpoint first, then plan.md. If the plan.md edit fails
+(permissions, unexpected content), the checkpoint still has authoritative
+state; on next resume, rebuild plan.md frontmatter from the checkpoint's
+`tasks` array.
+
+**Never** edit plan.md's human-authored body (the task spec, the prose
+intro, the success criteria) — only the frontmatter scalar fields and the
+per-task `**Status:**` / `**Commit:**` / `**Provider:**` / `**Blocker:**`
+metadata lines.
+
 ## Model Selection
 
 Model routing is declarative. The mapping from **tier → ordered (provider, model) chain** lives in [`../../config/models.yaml`](../../config/models.yaml). The controller does NOT hardcode model names in dispatch code. The yaml is the source of truth; you edit it to add new models.
