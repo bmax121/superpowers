@@ -1,5 +1,61 @@
 # Changelog
 
+## [6.1.0] - 2026-04-15
+
+Convergence loop + weekly-percent budget + plan-as-state. Minor breaking
+changes to autonomous CLI flags and plan format.
+
+### Breaking changes
+
+- **`plan.md` now carries YAML frontmatter and per-task `**Status:**`
+  markers.** Plans written by 6.0.0's `writing-plans` will still execute,
+  but new plans require the frontmatter (automatically produced by
+  `writing-plans` 6.1.0). `/resume-plan` prefers frontmatter; the old
+  checkpoint-only path remains as a fallback for 6.0.0 plans.
+- **`scripts/run-plan-autonomous.sh --max-cost N` is deprecated.** Still
+  works with a warning; treated as `--budget-cap-usd N`. Will be removed
+  in 7.0.0. Prefer `--budget-pct N` against
+  `~/.claude/superpowers-budget.yaml`.
+
+### New features
+
+- **Weekly-percent budget.** `scripts/compute-weekly-spent.sh` reads
+  `~/.claude/metrics/costs.jsonl` and outputs this week's spend. The
+  autonomous driver's `--budget-pct N` uses this against
+  `weekly_cap_usd` in `~/.claude/superpowers-budget.yaml`.
+  `--budget-pct none` for unlimited; `--budget-cap-usd N` as escape hatch
+  for users without a weekly cap configured.
+- **`final_goal` per plan.** Plan Start Initialization asks for one of
+  seven templates (`all_tests_pass`, `code_review_clean`,
+  `verify_command_zero`, `deploy_success`, `canary_clean`, `metrics_met`,
+  `custom`). Programmatic templates verify via shell command; `custom`
+  dispatches the new Goal Judge subagent.
+- **Convergence loop.** After all tasks reach terminal state, the
+  controller verifies `final_goal`. On failure, the Gap Analyzer
+  subagent proposes fresh tasks; the controller appends them and
+  re-enters the main loop. Bounded by `max_convergence_rounds` (default
+  3).
+- **Plan-as-state.** YAML frontmatter holds `current_task`,
+  `convergence_round`, `status`, and `autonomous_limits`. The controller
+  edits frontmatter + per-task `**Status:**` alongside each checkpoint
+  write. `git log plan.md` becomes an execution audit trail.
+- **Extended termination statuses.** `frontmatter.status` ends in one of
+  `goal_met` | `goal_not_met` | `budget_exhausted` | `stalled` |
+  `blocked` | `judge_uncertain` | `review_contradiction` |
+  `main_branch_gate`. Each maps to a specific exit code.
+- **`executing-plans` frontmatter-first entry.** `/resume-plan` accepts
+  either a plan.md or a checkpoint.json; the plan path is preferred.
+
+### Upgrade notes
+
+1. **6.0.0 plans** keep working — they have no frontmatter, so
+   `/resume-plan` falls back to checkpoint-only resume.
+2. **Users on `--max-cost N`** see a deprecation warning; no action
+   needed until 7.0.0.
+3. **To use `--budget-pct`**: create `~/.claude/superpowers-budget.yaml`
+   with a `weekly_cap_usd: <your-plan-cap>`. Example at
+   `config/superpowers-budget.example.yaml`.
+
 ## [6.0.0] - 2026-04-13
 
 This is a major release. The core change is that `subagent-driven-development`
