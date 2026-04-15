@@ -631,16 +631,100 @@ better paper trail.
 
 **Exit condition:** No issues remain in `valid` state (either all fixed and re-approved, or all rejected/deferred).
 
-### When to Escalate to the User (hard gates)
+## Convergence Loop
 
-The controller asks the user ONLY in these cases:
+Triggered when **all** tasks reach a terminal state (`done`, `deferred`,
+or `superseded`) — `blocked` is NOT terminal; a blocked task is its own
+hard gate (see below).
 
-- **Operation on `main`/`master`** — always ask before merging, pushing, or rebasing.
-- **Implementer reports BLOCKED and all providers in the tier chain have been exhausted** — no fallback remains.
-- **Every external reviewer finding is deferred** (zero valid, zero rejected, all ambiguous) AND the task appears stuck — surface `open_questions` and ask for a direction.
-- **Reviewer A and Reviewer B actively contradict** on a `Critical` finding (one says "must fix", other says "must not fix") — truly ambiguous; user decides.
+```
+CONVERGENCE_LOOP:
+  # Step 1 — verify final_goal
+  case plan.final_goal.template:
+    programmatic ({all_tests_pass, verify_command_zero, deploy_success,
+                  canary_clean, metrics_met}):
+      run the appropriate command(s); capture exit + stdout+stderr tail.
+    code_review_clean:
+      reuse the final code-reviewer's output already recorded in
+      decisions_log; verdict = no Critical/Important ⇒ met.
+    custom:
+      dispatch Goal Judge subagent (./goal-judge-prompt.md).
 
-Everything else: decide, log, proceed.
+  append decisions_log entry: stage=final_goal_verification,
+    outcome={met|not_met|uncertain}, evidence=<tail>
+
+  # Step 2 — act on verdict
+  if met:
+    frontmatter.status = goal_met; terminate 0.
+  if uncertain:   # only custom template can produce this
+    write NEEDS_HUMAN.txt; frontmatter.status = judge_uncertain;
+    terminate 2.
+  # else: not_met
+
+  # Step 3 — convergence bounds
+  convergence_round += 1
+  if convergence_round > max_convergence_rounds:
+    frontmatter.status = goal_not_met; write conclusion to decisions_log
+    (include last verify output + suggested next step); terminate 1.
+  if budget check would fail for even one more task:
+    frontmatter.status = budget_exhausted; terminate 1.
+
+  # Step 4 — gap analysis
+  dispatch Gap Analyzer subagent (./gap-analyzer-prompt.md)
+    inputs: final_goal, last verify output, full plan.md,
+            last 20 decisions_log entries
+  parse output:
+    Verdict: actionable | unreachable
+    TaskCount: N
+    tasks: [{name, tier, rationale, spec}, ...]
+  if Verdict == unreachable:
+    write NEEDS_HUMAN.txt; frontmatter.status = goal_not_met;
+    include analyzer rationale; terminate 2.
+
+  # Step 5 — append tasks
+  for each new task:
+    append `## Task X: <name>` to plan.md with
+      **Tier:** <tier>
+      **Status:** pending
+      **Rationale:** <analyzer rationale>
+      <spec body>
+  frontmatter.current_task = first new task number
+  no_progress_count = 0    # convergence counts as progress
+
+  # Step 6 — re-enter main subagent-driven-development loop
+  dispatch implementer for the new current_task; three-stage review;
+  eventually re-enter CONVERGENCE_LOOP.
+```
+
+**Why gap analyzer is a subagent, not the controller itself:** the
+controller's context is full of review history from the prior tasks; a
+fresh subagent sees the situation cleanly and is less likely to propose
+tasks that rehash already-rejected triage decisions.
+
+**Why `no_progress_count` resets on convergence:** the stall guard is to
+catch "dispatched tasks but none completed" — convergence-added tasks
+are legitimate new progress, not a stall.
+
+### Hard-gate termination matrix
+
+| Trigger | `frontmatter.status` | exit | Outputs |
+|---|---|---|---|
+| final_goal met | `goal_met` | 0 | Summary line + final verify output |
+| Convergence rounds exhausted, not_met | `goal_not_met` | 1 | Last-round gap analyzer rationale |
+| Weekly budget (pct or cap) exceeded | `budget_exhausted` | 1 | Spend summary |
+| No-progress abort | `stalled` | 1 | Last `done` timestamp, counters |
+| Task BLOCKED with providers exhausted | `blocked` | 2 | NEEDS_HUMAN.txt with blocker |
+| Goal Judge returns `uncertain` | `judge_uncertain` | 2 | NEEDS_HUMAN.txt with judge output |
+| Reviewer A/B contradict on Critical | `review_contradiction` | 2 | NEEDS_HUMAN.txt with both reviewer outputs |
+| main/master operation proposed | `main_branch_gate` | 2 | NEEDS_HUMAN.txt with proposed action |
+
+Interactive mode: all `exit 2` (NEEDS_HUMAN) cases ask the user via
+AskUserQuestion instead of writing the file. All `exit 1` cases still emit
+a summary to stdout. `exit 0` is the success path.
+
+Autonomous mode: all `exit 2` cases write `NEEDS_HUMAN.txt` and the outer
+`run-plan-autonomous.sh` stops the loop. The user inspects the file and
+decides whether to resume.
 
 ### External Review Example
 
