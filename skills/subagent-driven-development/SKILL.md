@@ -58,7 +58,7 @@ digraph process {
         "Dispatch implementer to fix valid findings" [shape=box];
 
         "Mark task complete in TodoWrite + write checkpoint" [shape=box style=filled fillcolor=lightyellow];
-        "Score next-task relatedness, pick threshold (30/50/70)" [shape=box];
+        "Score next-task relatedness, pick threshold (60/75/85)" [shape=box];
         "Recompute context estimate. pct >= threshold?" [shape=diamond];
         "Emit Resume Prompt, stop session" [shape=box style=filled fillcolor=lightcoral];
     }
@@ -87,8 +87,8 @@ digraph process {
     "Any Critical or Valid Important findings?" -> "Dispatch implementer to fix valid findings" [label="yes"];
     "Any Critical or Valid Important findings?" -> "Mark task complete in TodoWrite + write checkpoint" [label="no"];
     "Dispatch implementer to fix valid findings" -> "Dispatch unified reviewer (./unified-reviewer-prompt.md)" [label="re-review"];
-    "Mark task complete in TodoWrite + write checkpoint" -> "Score next-task relatedness, pick threshold (30/50/70)";
-    "Score next-task relatedness, pick threshold (30/50/70)" -> "Recompute context estimate. pct >= threshold?";
+    "Mark task complete in TodoWrite + write checkpoint" -> "Score next-task relatedness, pick threshold (60/75/85)";
+    "Score next-task relatedness, pick threshold (60/75/85)" -> "Recompute context estimate. pct >= threshold?";
     "Recompute context estimate. pct >= threshold?" -> "Emit Resume Prompt, stop session" [label="yes"];
     "Recompute context estimate. pct >= threshold?" -> "More tasks remain?" [label="no"];
     "More tasks remain?" -> "Route task to provider (tier → models.yaml)" [label="yes"];
@@ -153,6 +153,16 @@ Only when the user chose autonomous mode, ask:
 > - `max_handoffs` (10) — hard cap on session spawns.
 > - `no_progress_abort_after` (2) — stop if N handoffs produce zero new `done` tasks.
 
+### Question 4 — context-handoff policy (ask in both modes)
+
+> "Allow automatic context-based handoffs during this plan?"
+> - **Yes (default)**: at each task boundary, pause and hand off when context pct crosses the relatedness threshold (60/75/85 for low/medium/high). Safer for long plans; state is persisted so a crashed session recovers cleanly.
+> - **No, run to completion**: skip context handoffs entirely. The controller keeps running and relies on Claude Code's `/compact` to shed history if pressure grows. Best for short plans, or when you want unbroken flow and accept that a genuinely full context will degrade via auto-compact instead of cleanly handing off.
+
+The choice is plan-scoped and persists across resumes. Hard gates
+(main-branch ops, BLOCKED with all providers exhausted, convergence
+stalemate) are independent of this switch and still stop the session.
+
 Write all answers into plan frontmatter:
 
 ```yaml
@@ -167,6 +177,7 @@ current_task: 1
 convergence_round: 0
 last_handoff: {pct: 0, ts: null}
 checkpoint_pointer: docs/superpowers/checkpoints/<basename>-checkpoint.json
+handoff_disabled: false
 autonomous_limits:
   budget_pct: 30
   max_convergence_rounds: 3
@@ -174,6 +185,10 @@ autonomous_limits:
   no_progress_abort_after: 2
 ---
 ```
+
+`handoff_disabled` is optional; absent means `false`. Env override
+`SUPERPOWERS_HANDOFF_DISABLED=1` wins over the frontmatter value for a
+single run.
 
 If the user chose Interactive, omit `autonomous_limits`.
 
@@ -213,7 +228,7 @@ This skill is paired with [`superpowers:long-context-checkpoint`](../long-contex
 3. **After every task's `Mark task complete` step** — rewrite checkpoint with updated `tasks[].status`, `commit`, `triage_decisions`, and updated `todos`.
 4. **After every auto-triage decision** — append one entry to `decisions_log` and rewrite.
 5. **After every provider fallback event** — append one entry to `decisions_log` and rewrite.
-6. **After every checkpoint write** — (a) recompute `last_context_estimate_pct` per the formula in `long-context-checkpoint` skill, (b) score the NEXT pending task's relatedness to the current session (high/medium/low) and pick the corresponding threshold (70/50/30), (c) if `pct >= threshold`, emit the Resume Prompt and stop. The relatedness rationale goes in the checkpoint for audit. See `long-context-checkpoint` skill → "Handoff Threshold (relatedness-aware)" for the full scoring rubric.
+6. **After every checkpoint write** — (a) recompute `last_context_estimate_pct` per the formula in `long-context-checkpoint` skill, (b) score the NEXT pending task's relatedness to the current session (high/medium/low) and pick the corresponding threshold (85/75/60), (c) if `$SUPERPOWERS_HANDOFF_DISABLED=1` OR plan frontmatter has `handoff_disabled: true`, skip the handoff check (still print a warning above threshold so the user sees pressure); otherwise if `pct >= threshold`, emit the Resume Prompt and stop. The relatedness rationale goes in the checkpoint for audit. See `long-context-checkpoint` skill → "Handoff Threshold (relatedness-aware)" for the full scoring rubric.
 
 Never treat the checkpoint as optional. If the write fails (disk full, permissions), stop and surface the error — do not continue without durable state.
 

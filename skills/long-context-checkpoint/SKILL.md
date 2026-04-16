@@ -1,6 +1,6 @@
 ---
 name: long-context-checkpoint
-description: Use during subagent-driven-development to persist plan execution state to disk, and to hand off to a fresh session when the controller's context budget approaches 50%. Subagents are fresh per task, so the only state that needs to survive a session swap lives in the controller — this skill externalizes it.
+description: Use during subagent-driven-development to persist plan execution state to disk, and to hand off to a fresh session when the controller's context budget crosses a relatedness-aware threshold (60/75/85 for low/medium/high relatedness of the next task). Subagents are fresh per task, so the only state that needs to survive a session swap lives in the controller — this skill externalizes it.
 ---
 
 # Long-Context Checkpoint
@@ -91,7 +91,7 @@ There is no lost link.
   ],
   "last_context_estimate_pct": 42,
   "next_task_relatedness": "medium",        // "high" | "medium" | "low"
-  "handoff_threshold_pct": 50,              // 30 if low, 50 if medium, 70 if high
+  "handoff_threshold_pct": 75,              // 60 if low, 75 if medium, 85 if high
   "relatedness_rationale": "Task 3 is a new module unrelated to Task 2's cache work",
   "last_updated": "2026-04-13T14:30:05Z"
 }
@@ -133,25 +133,62 @@ one-liner) works for producing the content; the controller typically
 produces the JSON inline and writes it directly. The only hard requirement
 is that the file on disk never be a half-written JSON.
 
-## Context Estimation (Conservative Self-Report)
+## Context Estimation (from the transcript)
 
-Claude Code does not expose a token counter API. Use this conservative
-formula. It is intentionally biased HIGH so handoff fires earlier rather
-than too late — a slightly-early handoff costs nothing, a late one loses
-state.
+Source of truth: real `input_tokens + cache_creation_input_tokens +
+cache_read_input_tokens` from Claude Code's transcript JSONL. This matches
+`claude-hud`'s fallback calculation and stays aligned with `/context`.
+The prior character-accumulation formula systematically over-reported
+because it counted text dispatched to stateless subagents (which never
+returns to the controller's window) and applied a `*0.8` safety-margin
+divisor that inflated the result by another 25%.
 
+**Helper**: `scripts/estimate-context-pct.sh` (in the superpowers plugin
+root). It auto-detects the current session's transcript and prints one
+JSON line:
+
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/scripts/estimate-context-pct.sh"
+# {"pct":42,"input_tokens":421337,"window_size":1000000,
+#  "model":"claude-opus-4-6","transcript":"…","source":"transcript"}
 ```
-chars_budget  = 4_000_000           # Opus 1M tokens ≈ 4M chars (4 chars/token)
-chars_used    = len(plan_text)
-              + sum(len(review_output) for each review in this session)
-              + sum(len(triage_log)    for each triage in this session)
-              + len(implementer_reports)          # accumulated
-              + session_overhead = 50_000         # instructions, tool defs, hooks
-pct           = chars_used / (chars_budget * 0.8) * 100
-```
 
-Round UP. If in doubt, over-report. Store the result in
+Parse `.pct` (e.g. `jq -r .pct`) and store it in
 `last_context_estimate_pct` on every checkpoint write.
+
+**Context window size detection** (first hit wins):
+1. `$SUPERPOWERS_CONTEXT_WINDOW_SIZE` env override (e.g. `1000000` for
+   Opus 4.6 1M mode, `200000` for standard). Set this once in your shell
+   or in the autonomous-loop launcher if you run a non-standard window.
+2. Self-calibrating: if any earlier turn in this transcript observed
+   total tokens > 200_000, the helper switches to 1M mode for the rest
+   of the session.
+3. Default 200_000.
+
+The self-calibrating default means a 1M session is reported against
+the 200K window until the first turn exceeds 200K tokens — that yields
+a conservative (biased-high) pct early, matching the original skill's
+intent without the structural 25% inflation.
+
+**Fallback when the helper cannot read the transcript** (non-Claude-Code
+harness, missing `python3`, etc.): the helper prints
+`{"pct":0,"source":"error",...}` and exits 0. In that case, fall back
+to a coarse character-based approximation:
+
+```
+chars_per_token = 3.5                    # realistic for mixed code+prose
+window_tokens   = $SUPERPOWERS_CONTEXT_WINDOW_SIZE or 200_000
+chars_budget    = window_tokens * chars_per_token
+chars_used      = len(plan_text)
+                + sum(len(review_output) for reviews in-session)
+                + sum(len(triage_log)    for triages in-session)
+                + len(implementer_reports)
+                + 50_000                 # instructions + tool defs + hooks
+pct             = min(100, round(chars_used / chars_budget * 100))
+```
+
+Do NOT add a `/0.8` "safety margin" — it silently over-reports by 25%.
+The helper path is always preferred; fallback is a last resort.
 
 **Recompute** after:
 - Every external review returns (biggest contributor)
@@ -173,9 +210,17 @@ at each checkpoint, and picks the threshold from this table:
 
 | Next task relatedness to current session | Handoff at pct ≥ |
 |---|---|
-| **High** (same module, extends current task's code, needs architectural discussion from this session, reviews already built up) | **70%** |
-| **Medium** (default; shares some context but could be re-derived) | **50%** |
-| **Low** (independent task, different module, clean boundary, fresh reader could start from the commits alone) | **30%** |
+| **High** (same module, extends current task's code, needs architectural discussion from this session, reviews already built up) | **85%** |
+| **Medium** (default; shares some context but could be re-derived) | **75%** |
+| **Low** (independent task, different module, clean boundary, fresh reader could start from the commits alone) | **60%** |
+
+Thresholds sit below Claude Code's auto-compact point (~90%) with enough
+headroom that the next task's own context growth won't push the session
+past auto-compact before the following checkpoint fires. Earlier versions
+of this skill used 30/50/70 which — combined with a character-based
+context estimator that systematically over-reported by ~25% — caused
+handoff to fire at nearly every task boundary; both were symptoms of
+treating conservative numbers as free.
 
 ### How to score relatedness (one pass per checkpoint)
 
@@ -202,7 +247,7 @@ just to avoid handoff.
 - **pct ≥ threshold(relatedness)**: emit Resume Prompt and stop. Do NOT ask the user "should I hand off?" — the threshold encodes the decision. The user can ignore the prompt and keep going manually if they want; emitting the prompt just makes the boundary visible.
 - **Approaching threshold (within 10 pp)**: print a one-line warning with the computed relatedness and threshold, e.g.:
   ```
-  [context] pct=62% relatedness=high threshold=70% — continuing
+  [context] pct=78% relatedness=high threshold=85% — continuing
   ```
   This makes the controller's reasoning visible without interrupting flow.
 
@@ -212,7 +257,7 @@ Record the relatedness decision in the checkpoint:
 {
   "last_context_estimate_pct": 62,
   "next_task_relatedness": "high",
-  "handoff_threshold_pct": 70,
+  "handoff_threshold_pct": 85,
   "relatedness_rationale": "Task 4 extends the cache module modified in Task 3 and depends on the locking invariant agreed during Task 3 triage"
 }
 ```
@@ -231,15 +276,48 @@ alternatives:
 | **Tactical** (inside a task) | `/compact` | LLM-summarizes conversation history, keeps TodoWrite / CLAUDE.md / memory | **Lossy** — summary is LLM-chosen; silent degradation possible |
 | **Strategic** (plan-level boundary) | handoff (this skill) | Writes `checkpoint.json`, terminates session, new session rebuilds state | **Lossless** — structured data, no LLM compression |
 
+### Handoff enablement — check before running the threshold logic
+
+Evaluate the handoff kill-switches first; skip the entire threshold
+check when either is set:
+
+1. Env var `$SUPERPOWERS_HANDOFF_DISABLED=1` — session-scoped override
+   for the user to force "run to completion" without editing the plan.
+2. Plan frontmatter `handoff_disabled: true` — plan-scoped choice made
+   during Plan Start Initialization (Question 4). Persists across
+   resumes.
+
+When either is true: skip context-based handoff entirely. Continue
+writing checkpoints as normal (state is still persisted), keep
+recomputing `last_context_estimate_pct` for visibility, and print the
+approaching-threshold warning line so the user sees growing pressure —
+but do NOT emit the Resume Prompt. If pct actually crosses ~85%, print a
+one-line warning advising `/compact`; the user can still manually
+`/compact` or restart if they notice degradation.
+
+Hard gates (main-branch ops, BLOCKED with all providers exhausted,
+convergence stalemate) remain ungated by this switch — they are
+correctness gates, not context pressure.
+
 ### Decision matrix
 
 ```
+handoff_disabled (env or frontmatter)   → never context-handoff; continue
+                                          (hard gates still apply)
 pct < 40%                               → do nothing
-pct 40-50%  AND  relatedness = high    → /compact, keep running in this session
+pct 40% to (threshold - 10pp)           → print one-line status, continue
+pct within 10pp of threshold            → print warning + suggest /compact,
+                                          continue
 pct reaches handoff_threshold_pct       → handoff (emit Resume Prompt, stop)
-relatedness = low at a task boundary    → handoff regardless of pct
-                                          (fresh session starts clean)
 ```
+
+The prior rule "relatedness = low at a task boundary → handoff regardless
+of pct" has been removed. That rule forced a session break at every
+independent task boundary, which — combined with the old over-reporting
+estimator — caused handoff to fire nearly every task. A fresh session
+is cheaper in principle, but forcing one when pct is low (e.g. 15%)
+wastes more on cold-start overhead than it saves. The pct threshold
+alone is the handoff trigger now.
 
 ### Why both
 
@@ -256,28 +334,36 @@ relatedness = low at a task boundary    → handoff regardless of pct
 ### Sequence in a long plan
 
 A typical plan with context pressure looks like this:
-1. Work through tasks 1-3, pct climbs to 45%.
-2. Task 4 is tightly related (modifies Task 3's code) — controller invokes
+1. Work through tasks 1-4, pct climbs to 55%.
+2. Task 5 is tightly related (modifies Task 4's code) — controller invokes
    `/compact` (not handoff), pct drops to ~25%, keeps going.
-3. Tasks 4-6 complete, pct back to 50%.
-4. Task 7 is a new independent module — relatedness is low, so handoff
-   threshold is 30%. Since pct=50% ≥ 30%, controller **handoffs**.
-5. New session starts from checkpoint. Task 7 begins with a clean
-   200K-token budget.
+3. Tasks 5-8 complete, pct back to 65%.
+4. Task 9 is a new independent module — relatedness is low, threshold is
+   60%. Since pct=65% ≥ 60%, controller **handoffs**.
+5. New session starts from checkpoint. Task 9 begins with a clean window.
+
+If the user answered "run to completion" at Plan Start Initialization
+(`handoff_disabled: true`), step 4 would instead print a warning and
+continue; the session goes on until the plan finishes or Claude Code's
+auto-compact kicks in.
 
 ### What the controller actually does at each checkpoint
 
 After writing the checkpoint and computing `pct`:
 
 ```
-if pct >= handoff_threshold_pct:
+if handoff_disabled_via_env_or_frontmatter:
+    if pct >= handoff_threshold_pct:
+        print "[context] pct=X% ≥ threshold=Y% but handoff_disabled — /compact recommended"
+    elif pct >= handoff_threshold_pct - 10:
+        print "[context] pct=X% approaching threshold=Y% — /compact may help"
+    continue.
+elif pct >= handoff_threshold_pct:
     emit Resume Prompt; stop.
 elif pct >= 40 and next_task_relatedness == "high":
     suggest (but do NOT auto-run) /compact in the progress line:
       "[context] pct=45% — /compact recommended before continuing"
-    # The user or controller invokes /compact manually. This is one of the
-    # few things where a suggestion to the user is fine because /compact
-    # is itself a user-gesture tool in Claude Code.
+    # /compact is a user gesture in Claude Code, not an Agent tool call.
 else:
     continue silently.
 ```
